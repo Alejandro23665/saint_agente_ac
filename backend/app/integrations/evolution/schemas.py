@@ -49,3 +49,21 @@ class CreateInstanceResponse(_Base):
 
 class ConnectionStateResponse(_Base):
     instance: _InstanceInfo
+
+
+class InstanceInfo(_Base):
+    """Datos de una instancia según /instance/fetchInstances."""
+
+    name: str
+    connection_status: str | None = Field(default=None, alias="connectionStatus")
+    # JID del teléfono vinculado, ej. "584121234567@s.whatsapp.net".
+    owner_jid: str | None = Field(default=None, alias="ownerJid")
+    profile_name: str | None = Field(default=None, alias="profileName")
+
+    @property
+    def phone_number(self) -> str | None:
+        """Número en formato internacional (+584121234567), sacado del JID."""
+        if not self.owner_jid:
+            return None
+        digits = self.owner_jid.split("@", 1)[0].split(":", 1)[0]
+        return f"+{digits}" if digits.isdigit() else None

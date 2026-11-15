@@ -24,6 +24,15 @@ class Settings(BaseSettings):
     evolution_base_url: str = "http://localhost:8080"
     evolution_api_key: SecretStr = SecretStr("")
 
+    # Dirección con la que Evolution llega a esta API para mandar los webhooks.
+    # En desarrollo Evolution corre dentro de Docker y la API en tu computadora:
+    # host.docker.internal es "la computadora" vista desde un contenedor.
+    public_webhook_base_url: str = "http://host.docker.internal:8000"
+
+    # Clave para cifrar los tokens guardados en la base (Fernet, 32 bytes en base64).
+    # Si se pierde, los tokens cifrados ya no se pueden leer.
+    fernet_key: SecretStr = SecretStr("")
+
 
 @lru_cache
 def get_settings() -> Settings:

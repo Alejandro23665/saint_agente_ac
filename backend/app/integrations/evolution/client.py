@@ -19,11 +19,43 @@ from app.integrations.evolution.schemas import (
     ConnectionState,
     ConnectionStateResponse,
     CreateInstanceResponse,
+    InstanceInfo,
     QrCode,
 )
 
 # Crear una instancia tarda ~5 s: Evolution espera a que Baileys genere el primer QR.
 DEFAULT_TIMEOUT = httpx.Timeout(20.0, connect=5.0)
+
+
+# Eventos que Saint pide a Evolution. Los demás (contactos, chats, presencia...) no se
+# usan y solo generarían tráfico.
+WEBHOOK_EVENTS = (
+    "MESSAGES_UPSERT",  # mensaje nuevo (entrante o enviado desde el teléfono)
+    "MESSAGES_UPDATE",  # cambio de estado: entregado, leído
+    "SEND_MESSAGE",  # confirmación de un mensaje que enviamos por la API
+    "CONNECTION_UPDATE",  # el número se conectó, se desconectó o fue bloqueado
+    "QRCODE_UPDATED",  # hay un QR nuevo para escanear
+)
+
+
+@dataclass(frozen=True)
+class WebhookConfig:
+    url: str
+    # Cabeceras que Evolution manda en cada webhook; ahí va nuestro secreto.
+    headers: dict[str, str]
+    events: tuple[str, ...] = WEBHOOK_EVENTS
+
+    def as_body(self) -> dict[str, Any]:
+        return {
+            "enabled": True,
+            "url": self.url,
+            "headers": self.headers,
+            "events": list(self.events),
+            # Un solo endpoint para todos los eventos (no /messages-upsert, etc.).
+            "byEvents": False,
+            # Sin archivos en base64 dentro del webhook: pesan mucho; se descargan aparte.
+            "base64": False,
+        }
 
 
 class EvolutionError(Exception):
@@ -87,9 +119,17 @@ class EvolutionClient:
     # --- Operaciones -----------------------------------------------------------------
 
     async def create_instance(
-        self, name: str, *, groups_enabled: bool = False, token: str | None = None
+        self,
+        name: str,
+        *,
+        groups_enabled: bool = False,
+        token: str | None = None,
+        webhook: WebhookConfig | None = None,
     ) -> CreatedInstance:
-        """Crea un número nuevo (Baileys) y devuelve su primer QR."""
+        """Crea un número nuevo (Baileys) y devuelve su primer QR.
+
+        Con webhook, Evolution queda apuntando a Saint desde el primer evento.
+        """
         token = token or secrets.token_urlsafe(32)
         body = {
             "instanceName": name,
@@ -105,6 +145,8 @@ class EvolutionClient:
             "readStatus": False,
             "syncFullHistory": False,
         }
+        if webhook is not None:
+            body["webhook"] = webhook.as_body()
         data = await self._request("POST", "/instance/create", json=body)
         parsed = CreateInstanceResponse.model_validate(data)
         qr = parsed.qrcode if parsed.qrcode and not parsed.qrcode.is_empty else None
@@ -136,6 +178,19 @@ class EvolutionClient:
         if state not in ("open", "connecting", "close"):
             raise EvolutionError(f"Estado desconocido de Evolution: {state!r}")
         return state  # type: ignore[return-value]
+
+    async def set_webhook(self, name: str, webhook: WebhookConfig) -> None:
+        """Cambia a dónde manda Evolution los eventos de un número (ej. nuevo dominio)."""
+        await self._request(
+            "POST", f"/webhook/set/{_path(name)}", json={"webhook": webhook.as_body()}
+        )
+
+    async def fetch_instance(self, name: str) -> InstanceInfo:
+        """Datos de la instancia, incluido el número de teléfono una vez vinculado."""
+        data = await self._request("GET", "/instance/fetchInstances", params={"instanceName": name})
+        if not data:
+            raise EvolutionError(f"Evolution no encontró la instancia {name!r}", 404)
+        return InstanceInfo.model_validate(data[0])
 
     async def logout(self, name: str) -> None:
         """Desvincula el teléfono; la instancia queda creada y puede pedir otro QR."""
