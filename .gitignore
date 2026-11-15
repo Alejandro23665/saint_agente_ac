@@ -16,3 +16,6 @@ __pycache__/
 Thumbs.db
 .vscode/
 .idea/
+
+# QR temporales del script de prueba de Evolution
+qr-*.png

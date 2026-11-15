@@ -1,6 +1,6 @@
-# Entorno de desarrollo: PostgreSQL con pgvector y Redis.
+# Entorno de desarrollo: PostgreSQL con pgvector, Redis y Evolution API.
 # Uso:  cp .env.example .env  y luego  docker compose up -d
-# Evolution API, el backend y los workers se añaden en fases siguientes.
+# El backend y los workers se añaden en bloques siguientes.
 services:
   postgres:
     # Imagen oficial de pgvector sobre PostgreSQL 16, con versión fijada.
@@ -12,6 +12,8 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
       APP_DB_USER: ${APP_DB_USER}
       APP_DB_PASSWORD: ${APP_DB_PASSWORD}
+      EVOLUTION_DB_USER: ${EVOLUTION_DB_USER}
+      EVOLUTION_DB_PASSWORD: ${EVOLUTION_DB_PASSWORD}
     ports:
       - "5432:5432"
     volumes:
@@ -32,6 +34,78 @@ services:
     volumes:
       - redis_data:/data
 
+  evolution:
+    # Evolution API: conecta los números de WhatsApp (por QR, con Baileys).
+    # Versión fijada: v2.4.0 todavía está en prueba (rc). Antes de subir de versión,
+    # se prueba en desarrollo, porque Evolution cambia la forma de sus respuestas.
+    image: evoapicloud/evolution-api:v2.3.7
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      SERVER_TYPE: http
+      SERVER_PORT: 8080
+      SERVER_URL: ${EVOLUTION_BASE_URL}
+      # Saint maneja Evolution por su API; no hace falta su panel ni su documentación.
+      SERVER_DISABLE_MANAGER: "true"
+      SERVER_DISABLE_DOCS: "true"
+      # Clave maestra: quien la tenga controla todos los números. Solo en .env.
+      AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY}
+      AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES: "false"
+      # Su propia base de datos (evolution) dentro del mismo PostgreSQL, con su propio
+      # usuario: Evolution no puede leer ni tocar las tablas de Saint.
+      DATABASE_PROVIDER: postgresql
+      DATABASE_CONNECTION_URI: postgresql://${EVOLUTION_DB_USER}:${EVOLUTION_DB_PASSWORD}@postgres:5432/evolution
+      DATABASE_CONNECTION_CLIENT_NAME: saint_evolution
+      DATABASE_SAVE_DATA_INSTANCE: "true"
+      DATABASE_SAVE_DATA_NEW_MESSAGE: "true"
+      DATABASE_SAVE_MESSAGE_UPDATE: "true"
+      DATABASE_SAVE_DATA_CONTACTS: "true"
+      DATABASE_SAVE_DATA_CHATS: "true"
+      # No copiar el historial antiguo del teléfono: Saint guarda sus propios mensajes.
+      DATABASE_SAVE_DATA_HISTORIC: "false"
+      DATABASE_SAVE_DATA_LABELS: "false"
+      # Caché en el mismo Redis, pero en otra base (/1) y con prefijo propio.
+      CACHE_REDIS_ENABLED: "true"
+      CACHE_REDIS_URI: redis://redis:6379/1
+      CACHE_REDIS_PREFIX_KEY: evolution
+      CACHE_REDIS_SAVE_INSTANCES: "true"
+      CACHE_LOCAL_ENABLED: "false"
+      # Un número desconectado no se borra solo.
+      DEL_INSTANCE: "false"
+      LANGUAGE: es
+      CONFIG_SESSION_PHONE_CLIENT: Saint
+      CONFIG_SESSION_PHONE_NAME: Chrome
+      QRCODE_LIMIT: 30
+      LOG_LEVEL: ERROR,WARN,INFO
+      # No enviar estadísticas de uso a los autores de Evolution.
+      TELEMETRY_ENABLED: "false"
+      # Integraciones que no usamos.
+      WEBSOCKET_ENABLED: "false"
+      RABBITMQ_ENABLED: "false"
+      SQS_ENABLED: "false"
+      PUSHER_ENABLED: "false"
+      TYPEBOT_ENABLED: "false"
+      CHATWOOT_ENABLED: "false"
+      OPENAI_ENABLED: "false"
+      DIFY_ENABLED: "false"
+      N8N_ENABLED: "false"
+      EVOAI_ENABLED: "false"
+      FLOWISE_ENABLED: "false"
+      S3_ENABLED: "false"
+      # El webhook se configura por número (bloque 3.3), no uno global.
+      WEBHOOK_GLOBAL_ENABLED: "false"
+    ports:
+      # Solo accesible desde esta misma máquina, nunca desde internet.
+      - "127.0.0.1:8080:8080"
+    volumes:
+      # Sesiones de WhatsApp: si se pierde este volumen, hay que volver a escanear el QR.
+      - evolution_instances:/evolution/instances
+
 volumes:
   postgres_data:
   redis_data:
+  evolution_instances:

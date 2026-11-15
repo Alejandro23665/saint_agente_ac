@@ -9,15 +9,16 @@ El diseño completo está en el documento de la Fase 1.
 |------|-----------|--------|
 | 1 | Diseño (arquitectura, esquema, riesgos) | Lista |
 | 2 | Modelos SQLAlchemy, migración Alembic, RLS y pruebas | Lista (PR #1) |
-| 3.1 | App FastAPI mínima con `/health` | Esta rama |
-| 3.2–3.7 | Evolution, webhook, cola ingest, guardado de mensajes | Pendiente |
+| 3.1 | App FastAPI mínima con `/health` | Lista (PR #2) |
+| 3.2 | Evolution API en Docker y cliente en Python | Esta rama |
+| 3.3–3.7 | Registrar número, webhook, cola ingest, guardado de mensajes | Pendiente |
 
 ## Estructura
 
 ```
 .
-├── docker-compose.yml          PostgreSQL 16 + pgvector y Redis para desarrollo
-├── docker/postgres/            Script que crea el usuario de la app (saint_app)
+├── docker-compose.yml          PostgreSQL 16 + pgvector, Redis y Evolution API v2.3.7
+├── docker/postgres/            Scripts que crean el usuario de la app y la base de Evolution
 ├── .env.example                Variables de entorno (copiar a .env)
 └── backend/
     ├── pyproject.toml          Dependencias (se instalan con uv)
@@ -27,6 +28,8 @@ El diseño completo está en el documento de la Fase 1.
     │   ├── api/health.py       GET /health: estado de PostgreSQL y Redis
     │   ├── core/config.py      Lee la configuración del .env
     │   ├── core/redis.py       Conexión a Redis
+    │   ├── integrations/evolution/  Cliente de Evolution API (instancias, QR, estado)
+    │   ├── scripts/evolution_qr.py  Prueba manual: conectar un WhatsApp con QR
     │   ├── db/base.py          Clase Base, convención de nombres y piezas comunes
     │   ├── db/ids.py           Generador de UUID v7
     │   ├── db/session.py       Conexión y sesiones con el negocio activo (RLS)
@@ -65,6 +68,22 @@ uv run alembic upgrade head --sql   # muestra el SQL sin ejecutarlo
 uv run alembic check            # avisa si los modelos cambiaron y falta una migración
 uv run ruff check . && uv run ruff format .   # revisión y formato del código
 ```
+
+## Conectar un WhatsApp de prueba (Evolution API)
+
+```bash
+docker compose up -d                       # levanta también Evolution en el puerto 8080
+cd backend
+uv run python -m app.scripts.evolution_qr prueba-andre
+```
+
+El script guarda el QR en `qr-prueba-andre.png`. Ábrelo y escanéalo desde WhatsApp >
+Dispositivos vinculados. Cuando diga "Conectado." el número quedó vinculado a Evolution.
+Para desvincularlo y borrarlo: `uv run python -m app.scripts.evolution_qr prueba-andre --borrar`.
+
+Si ya habías levantado PostgreSQL antes de este bloque, la base `evolution` no existe
+todavía (los scripts de `docker/postgres` solo corren con un volumen nuevo). En desarrollo,
+lo más simple es `docker compose down -v` (borra los datos locales) y volver a levantar.
 
 ## Dos usuarios de base de datos
 
