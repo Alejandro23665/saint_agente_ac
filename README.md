@@ -8,8 +8,9 @@ El diseño completo está en el documento de la Fase 1.
 | Fase | Contenido | Estado |
 |------|-----------|--------|
 | 1 | Diseño (arquitectura, esquema, riesgos) | Lista |
-| 2 | Modelos SQLAlchemy, migración Alembic, RLS y pruebas | Esta rama |
-| 3+ | Webhooks de Evolution, colas, agentes, panel | Pendiente |
+| 2 | Modelos SQLAlchemy, migración Alembic, RLS y pruebas | Lista (PR #1) |
+| 3.1 | App FastAPI mínima con `/health` | Esta rama |
+| 3.2–3.7 | Evolution, webhook, cola ingest, guardado de mensajes | Pendiente |
 
 ## Estructura
 
@@ -22,7 +23,10 @@ El diseño completo está en el documento de la Fase 1.
     ├── pyproject.toml          Dependencias (se instalan con uv)
     ├── alembic.ini             Configuración de migraciones
     ├── app/
+    │   ├── main.py             Crea la app FastAPI (conexiones al arrancar y apagar)
+    │   ├── api/health.py       GET /health: estado de PostgreSQL y Redis
     │   ├── core/config.py      Lee la configuración del .env
+    │   ├── core/redis.py       Conexión a Redis
     │   ├── db/base.py          Clase Base, convención de nombres y piezas comunes
     │   ├── db/ids.py           Generador de UUID v7
     │   ├── db/session.py       Conexión y sesiones con el negocio activo (RLS)
@@ -47,7 +51,11 @@ cd backend
 uv sync                         # crea .venv e instala las dependencias
 uv run alembic upgrade head     # crea las 19 tablas
 uv run pytest                   # corre las pruebas (crea y borra la base saint_test)
+uv run uvicorn app.main:app --reload   # arranca la API en http://localhost:8000
 ```
+
+Con la API corriendo, abre http://localhost:8000/health (debe decir `"status":"ok"`)
+y http://localhost:8000/docs para ver la documentación interactiva (solo en desarrollo).
 
 Comandos útiles:
 
