@@ -119,7 +119,7 @@ async def test_mensaje_de_texto_crea_todo(number: Number) -> None:
     assert contact.external_id == CLIENT
     assert contact.phone_e164 == "+584121234567"
     assert contact.display_name == "María"
-    assert contact.last_seen_at is not None and not contact.is_group
+    assert contact.last_seen_at.timestamp() == 1763240000 and not contact.is_group
 
     [conversation] = await number.all(Conversation)
     assert conversation.contact_id == contact.id

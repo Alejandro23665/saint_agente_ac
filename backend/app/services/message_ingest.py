@@ -180,13 +180,15 @@ async def upsert_contact(
         phone_e164=phone_from_jid(parsed.remote_jid),
         display_name=name,
         is_group=parsed.is_group,
-        last_seen_at=None if parsed.from_me else func.now(),
+        # La hora del mensaje, no la de procesarlo (puede procesarse con retraso).
+        last_seen_at=None if parsed.from_me else (parsed.timestamp or func.now()),
     )
     stmt = stmt.on_conflict_do_update(
         index_elements=["tenant_id", "channel", "external_id"],
         set_={
             "display_name": func.coalesce(stmt.excluded.display_name, Contact.display_name),
-            "last_seen_at": func.coalesce(stmt.excluded.last_seen_at, Contact.last_seen_at),
+            # GREATEST ignora NULL y nunca retrocede si llega antes un mensaje más viejo.
+            "last_seen_at": func.greatest(stmt.excluded.last_seen_at, Contact.last_seen_at),
         },
     ).returning(Contact.id)
     return await session.scalar(stmt)
