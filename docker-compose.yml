@@ -15,7 +15,9 @@ services:
       EVOLUTION_DB_USER: ${EVOLUTION_DB_USER}
       EVOLUTION_DB_PASSWORD: ${EVOLUTION_DB_PASSWORD}
     ports:
-      - "5432:5432"
+      # Puerto en tu computadora : puerto dentro del contenedor. El de la izquierda se
+      # cambia en .env si ya tienes otro PostgreSQL usando el 5432.
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       # Scripts que corren solo la primera vez que se crea la base.
@@ -30,7 +32,7 @@ services:
     image: redis:7.4-alpine
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
 
@@ -100,7 +102,7 @@ services:
       WEBHOOK_GLOBAL_ENABLED: "false"
     ports:
       # Solo accesible desde esta misma máquina, nunca desde internet.
-      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:${EVOLUTION_PORT:-8080}:8080"
     volumes:
       # Sesiones de WhatsApp: si se pierde este volumen, hay que volver a escanear el QR.
       - evolution_instances:/evolution/instances
