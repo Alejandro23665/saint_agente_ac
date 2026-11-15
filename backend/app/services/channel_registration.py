@@ -31,7 +31,41 @@ _STATUS_FROM_EVOLUTION = {
     "open": InstanceStatus.OPEN,
     "connecting": InstanceStatus.CONNECTING,
     "close": InstanceStatus.CLOSE,
+    "refused": InstanceStatus.CLOSE,  # se agotaron los QR sin escanear
 }
+# Motivo de desconexión de WhatsApp (DisconnectReason de Baileys) que significa bloqueo.
+BANNED_REASON = 403
+
+
+def apply_connection_state(
+    instance: ChannelInstance,
+    state: str,
+    *,
+    at: datetime,
+    status_reason: int | None = None,
+    phone_number: str | None = None,
+) -> InstanceStatus | None:
+    """Traduce el estado de Evolution al nuestro y lo guarda en la fila.
+
+    Lo usan el script (preguntando a Evolution) y el worker (con connection.update).
+    Devuelve el estado nuevo, o None si el aviso es más viejo que el estado actual o
+    el estado no se conoce.
+    """
+    status = _STATUS_FROM_EVOLUTION.get(state)
+    if status is None:
+        return None
+    if instance.status_changed_at is not None and at < instance.status_changed_at:
+        return None  # aviso atrasado: ya tenemos un estado más reciente
+    if status == InstanceStatus.CLOSE and status_reason == BANNED_REASON:
+        status = InstanceStatus.BANNED
+    if status == InstanceStatus.CONNECTING and instance.status == InstanceStatus.QR_PENDING:
+        status = InstanceStatus.QR_PENDING  # sigue esperando que escaneen el QR
+    instance.status = status
+    instance.status_changed_at = at
+    if status == InstanceStatus.OPEN:
+        instance.display_identifier = phone_number or instance.display_identifier
+        instance.last_connected_at = at
+    return status
 
 
 @dataclass(frozen=True)
@@ -118,8 +152,9 @@ async def refresh_connection_status(
 ) -> InstanceStatus:
     """Pregunta a Evolution el estado del número y lo guarda.
 
-    Al conectarse también guarda el teléfono visible (display_identifier). En el bloque
-    3.7 esto se hará solo con el evento connection.update; por ahora lo usa el script.
+    Al conectarse también guarda el teléfono visible (display_identifier). Con la API y
+    el worker en marcha esto llega solo con connection.update; el script lo usa mientras
+    espera el escaneo del QR.
     """
     async with tenant_session(tenant_id, factory=factory) as session:
         instance = await session.scalar(
@@ -129,12 +164,8 @@ async def refresh_connection_status(
             raise LookupError("El número no existe en este negocio")
 
         state = await evo.connection_state(instance.evolution_instance_name)
-        status = _STATUS_FROM_EVOLUTION[state]
-        if status == InstanceStatus.CONNECTING and instance.status == InstanceStatus.QR_PENDING:
-            status = InstanceStatus.QR_PENDING  # sigue esperando que escaneen el QR
-        instance.status = status
-        if status == InstanceStatus.OPEN:
-            info = await evo.fetch_instance(instance.evolution_instance_name)
-            instance.display_identifier = info.phone_number or instance.display_identifier
-            instance.last_connected_at = datetime.now(UTC)
-        return status
+        phone = None
+        if state == "open":
+            phone = (await evo.fetch_instance(instance.evolution_instance_name)).phone_number
+        status = apply_connection_state(instance, state, at=datetime.now(UTC), phone_number=phone)
+        return status or instance.status

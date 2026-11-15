@@ -40,6 +40,9 @@ class ChannelInstance(UUIDPrimaryKey, TenantOwned, Timestamps, SoftDelete, Base)
     settings: Mapped[dict[str, Any]] = mapped_column(JSONB, server_default="{}")
     last_connected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_event_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Momento del aviso que fijó el estado actual: un aviso más viejo que llegue tarde
+    # (por ejemplo, tras un reintento) no puede pisar un estado más nuevo.
+    status_changed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     tenant: Mapped["Tenant"] = relationship(  # noqa: F821
         back_populates="channel_instances", lazy="raise"

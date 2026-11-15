@@ -14,8 +14,8 @@ El diseño completo está en el documento de la Fase 1.
 | 3.3 | Registrar un número en Saint (cifrado, webhook) | Lista (PR #4) |
 | 3.4 | Recibir los avisos de Evolution y guardarlos en `webhook_events` | Lista (PR #5) |
 | 3.5 | Cola ingest (ARQ): el worker procesa cada aviso, con reintentos | Lista (PR #6) |
-| 3.6 | Cada aviso de mensaje se convierte en contacto, conversación y mensaje | Esta rama |
-| 3.7 | Estado de conexión y prueba completa | Pendiente |
+| 3.6 | Cada aviso de mensaje se convierte en contacto, conversación y mensaje | Lista (PR #7) |
+| 3.7 | Estado de conexión del número y prueba de punta a punta | Esta rama |
 
 ## Estructura
 
@@ -39,6 +39,7 @@ El diseño completo está en el documento de la Fase 1.
     │   ├── services/webhook_ingest.py  Validar el secreto y guardar cada aviso
     │   ├── services/webhook_processing.py  Procesar avisos: manejadores y reintentos
     │   ├── services/message_ingest.py  Aviso de mensaje -> contacto, conversación, mensaje
+    │   ├── services/connection_events.py  Aviso de conexión -> estado del número
     │   ├── workers/ingest.py   Worker ARQ de la cola ingest (+ barrido cada minuto)
     │   ├── integrations/evolution/  Cliente de Evolution API (instancias, QR, estado)
     │   ├── scripts/evolution_qr.py  Prueba manual: conectar un WhatsApp con QR
@@ -131,8 +132,8 @@ Cada aviso guardado se encola en Redis (cola `saint:ingest`). El worker lo toma,
 manejador de su tipo y lo marca `processed`; si falla, lo reintenta (10 s, 20 s, 40 s...)
 y tras 5 intentos lo deja en `failed` con el error. Cada minuto hace un barrido por si
 algún aviso no se pudo encolar (por ejemplo, Redis estaba caído). Los mensajes se guardan
-en `contacts`, `conversations` y `messages` (3.6); los avisos de conexión siguen en
-`pending` hasta el 3.7.
+en `contacts`, `conversations` y `messages`, y los avisos de conexión actualizan el
+estado del número en `channel_instances` (conectado, desconectado o bloqueado).
 
 En otra terminal, junto a la API:
 

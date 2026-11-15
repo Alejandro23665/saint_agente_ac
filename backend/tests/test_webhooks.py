@@ -44,6 +44,8 @@ def factory(app_engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
 class FakeQueue:
     """Hace de cola ARQ: recuerda lo que se encoló."""
 
+    default_queue_name = "saint:ingest"
+
     def __init__(self, broken: bool = False) -> None:
         self.jobs: list[tuple[str, tuple, dict]] = []
         self.broken = broken
