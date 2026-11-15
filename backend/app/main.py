@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.api import health, webhooks
 from app.core.config import Settings, get_settings
+from app.core.queue import create_queue_pool
 from app.core.redis import create_redis
 from app.db.session import build_engine
 
@@ -25,7 +26,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.engine = build_engine(settings.database_url)
         app.state.session_factory = async_sessionmaker(app.state.engine, expire_on_commit=False)
         app.state.redis = create_redis(settings.redis_url)
+        app.state.queue = create_queue_pool(settings.redis_url)
         yield
+        await app.state.queue.aclose()
         # Al apagar: cerrarlas ordenadamente.
         await app.state.redis.aclose()
         await app.state.engine.dispose()

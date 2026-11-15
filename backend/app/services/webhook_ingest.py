@@ -38,7 +38,9 @@ class InvalidSecretError(Exception):
 @dataclass(frozen=True)
 class StoredEvent:
     event_id: uuid.UUID | None  # None si era un duplicado
+    tenant_id: uuid.UUID
     event_type: str
+    status: WebhookEventStatus
     duplicate: bool
 
 
@@ -132,4 +134,10 @@ async def store_webhook_event(
             .values(last_event_at=func.now())
         )
 
-    return StoredEvent(event_id=event_id, event_type=event_type, duplicate=event_id is None)
+    return StoredEvent(
+        event_id=event_id,
+        tenant_id=tenant_id,
+        event_type=event_type,
+        status=status,
+        duplicate=event_id is None,
+    )
