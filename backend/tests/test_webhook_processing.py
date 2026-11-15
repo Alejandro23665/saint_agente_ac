@@ -171,7 +171,10 @@ async def test_worker_arq_real(owner_engine, factory, monkeypatch) -> None:
     )
     await worker.async_run()
     assert (worker.jobs_complete, worker.jobs_failed) == (1, 0)
-    await worker.close()
+    # No usamos worker.close(): con handle_signals=False manda SIGUSR1, que no existe
+    # en Windows. En modo burst ya no queda nada en marcha; solo cerramos la conexión.
+    await pool.delete(worker.health_check_key)
+    await pool.aclose()
 
     event = await load(event_id, tenant_id, factory)
     assert event.status == WebhookEventStatus.PROCESSED
