@@ -27,7 +27,8 @@ El diseño completo está en el documento de la Fase 1.
 | 5.6 | Bandeja en tiempo real: avisos al panel por `/events` (Redis + SSE) | Lista (PR #18) |
 | 4.4 | Conocimiento del negocio: fragmentos con embeddings (OpenRouter Nemotron) | Código listo (PR #12); la prueba real espera la clave de OpenRouter |
 | 4.5 a 4.8 | RAG, pasar a humano, notas de voz y prueba final | Pendientes (falta la clave de OpenRouter) |
-| 5.7 | Conocimiento desde el panel: subir textos, ver su estado, reintentar y borrar | Esta rama |
+| 5.7 | Conocimiento desde el panel: subir textos, ver su estado, reintentar y borrar | Lista (PR #19) |
+| 6.1 | Panel web: inicio de sesión, elegir negocio, menú e Inicio en tiempo real | Esta rama |
 
 ## Estructura
 
@@ -36,6 +37,7 @@ El diseño completo está en el documento de la Fase 1.
 ├── docker-compose.yml          PostgreSQL 16 + pgvector, Redis y Evolution API v2.3.7
 ├── docker/postgres/            Scripts que crean el usuario de la app y la base de Evolution
 ├── .env.example                Variables de entorno (copiar a .env)
+├── frontend/               Panel web (React + TypeScript, Vite)
 └── backend/
     ├── pyproject.toml          Dependencias (se instalan con uv)
     ├── alembic.ini             Configuración de migraciones
@@ -384,6 +386,33 @@ uv run python -m app.scripts.cargar_conocimiento borrar panaderia-prueba panader
 - Sin `OPENROUTER_API_KEY`, queda `failed` con ese aviso. El texto queda guardado: al
   poner la clave y reiniciar el worker, basta con reintentar.
 - Un texto nuevo con el mismo título reemplaza al viejo solo cuando el nuevo queda listo.
+
+## Panel web (Fase 6)
+
+El panel está en `frontend/` (React + TypeScript con Vite). Necesita Node.js 20 o más
+nuevo y la API encendida en `http://127.0.0.1:8000`.
+
+```bash
+cd frontend
+npm install        # la primera vez
+npm run dev        # abre http://127.0.0.1:5173
+```
+
+- En desarrollo, Vite pasa a la API todo lo que empieza por `/auth`, `/tenant`,
+  `/numbers`, `/conversations`, `/agent`, `/hours`, `/knowledge`, `/events` y `/health`.
+  Así el panel y la API se ven como una sola dirección y la cookie de sesión funciona
+  sin configurar nada más. Otra dirección de la API: `SAINT_API_URL=http://... npm run dev`.
+- El pase de 15 minutos vive solo en la memoria de la página y se renueva solo. Al
+  recargar, el panel pide uno nuevo con la cookie y recuerda el negocio elegido.
+- Inicio se actualiza solo con los avisos de `/events`.
+- Pruebas: `npm test`. Revisión de tipos: `npm run typecheck`.
+
+| Pantalla | Dirección |
+| --- | --- |
+| Iniciar sesión | `/iniciar-sesion` |
+| Elegir negocio (si tienes varios) | `/elegir-negocio` |
+| Inicio | `/` |
+| Bandeja, Números, Agente, Conocimiento, Equipo, Consumo, Ajustes | `/bandeja`, `/numeros`, `/agente`, `/conocimiento`, `/equipo`, `/consumo`, `/ajustes` (llegan en sus bloques) |
 
 ## Dos usuarios de base de datos
 
