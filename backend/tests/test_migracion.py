@@ -5,7 +5,7 @@ import asyncio
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
-import app.models  # noqa: F401  (registra las 19 tablas)
+import app.models  # noqa: F401  (registra las 20 tablas)
 from app.db.base import Base
 from tests.conftest import admin_url, drop_database, recreate_database, run_alembic
 
@@ -15,14 +15,14 @@ RLS_TABLES = {name for name, t in Base.metadata.tables.items() if "tenant_id" in
 }
 
 
-async def test_crea_las_19_tablas(owner_engine: AsyncEngine) -> None:
+async def test_crea_las_20_tablas(owner_engine: AsyncEngine) -> None:
     async with owner_engine.connect() as conn:
         rows = await conn.execute(
             text("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")
         )
         tables = {r[0] for r in rows} - {"alembic_version"}
     assert tables == set(Base.metadata.tables)
-    assert len(tables) == 19
+    assert len(tables) == 20
 
 
 def test_modelos_y_migracion_coinciden(migrated_database: str) -> None:
@@ -40,7 +40,7 @@ async def test_rls_activado_y_forzado(owner_engine: AsyncEngine) -> None:
             )
         )
         protected = {r[0] for r in rows}
-    assert len(RLS_TABLES) == 17
+    assert len(RLS_TABLES) == 18
     assert protected == RLS_TABLES
 
 

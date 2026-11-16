@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from app.api import auth, health, webhooks
+from app.api import auth, health, tenant, webhooks
 from app.core.config import Settings, get_settings
 from app.core.queue import create_queue_pool
 from app.core.redis import create_redis
@@ -59,6 +59,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(health.router)
     app.include_router(webhooks.router)
     app.include_router(auth.router)
+    app.include_router(tenant.router)
     return app
 
 

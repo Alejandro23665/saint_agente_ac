@@ -112,7 +112,7 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
-async def _open_session(
+async def open_session(
     session: AsyncSession,
     user_id: uuid.UUID,
     expires_at: datetime,
@@ -155,7 +155,7 @@ async def login(
             user.password_hash = hash_password(password)
         user.last_login_at = func.now()
         expires_at = _now() + timedelta(days=REFRESH_TOKEN_DAYS)
-        raw = await _open_session(session, user.id, expires_at, user_agent, ip)
+        raw = await open_session(session, user.id, expires_at, user_agent, ip)
     return NewSession(user, raw, expires_at)
 
 
@@ -183,7 +183,7 @@ async def refresh(
             if row.expires_at <= _now() or not user.is_active or user.deleted_at is not None:
                 raise InvalidSessionError
             row.revoked_at = func.now()
-            raw = await _open_session(session, user.id, row.expires_at, user_agent, ip)
+            raw = await open_session(session, user.id, row.expires_at, user_agent, ip)
             return NewSession(user, raw, row.expires_at)
 
     # Pase ya usado: alguien lo copió. Se cierran todas las sesiones del usuario.

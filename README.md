@@ -20,7 +20,8 @@ El diseño completo está en el documento de la Fase 1.
 | 4.2 | El bot espera 15 s a que el cliente termine y contesta (eco, sin IA) | Lista (PR #10) |
 | 4.3 | Respuesta con IA (Claude Haiku 5.5), agente del negocio y registro en `llm_runs` | Lista (PR #11) |
 | 4.4 a 4.8 | Conocimiento, RAG, pasar a humano, notas de voz y prueba final | Pendientes (falta la clave de OpenRouter) |
-| 5.1 | Inicio de sesión del panel: contraseñas argon2, pase JWT de 15 min y sesión de 7 días | Esta rama |
+| 5.1 | Inicio de sesión del panel: contraseñas argon2, pase JWT de 15 min y sesión de 7 días | Lista (PR #13) |
+| 5.2 | Negocio, miembros y roles; invitar con enlace de un solo uso | Esta rama |
 
 ## Estructura
 
@@ -36,7 +37,8 @@ El diseño completo está en el documento de la Fase 1.
     │   ├── main.py             Crea la app FastAPI (conexiones al arrancar y apagar)
     │   ├── api/health.py       GET /health: estado de PostgreSQL y Redis
     │   ├── api/webhooks.py     POST /webhooks/evolution/{public_id}: avisos de Evolution
-    │   ├── api/auth.py         /auth/...: entrar, renovar, elegir negocio, quién soy, salir
+    │   ├── api/auth.py         /auth/...: entrar, renovar, elegir negocio, quién soy, salir, aceptar invitación
+    │   ├── api/tenant.py       /tenant/...: datos del negocio, miembros, roles e invitaciones
     │   ├── core/config.py      Lee la configuración del .env
     │   ├── core/redis.py       Conexión a Redis
     │   ├── core/queue.py       Cola ingest (ARQ): nombre y cómo encolar
@@ -51,6 +53,8 @@ El diseño completo está en el documento de la Fase 1.
     │   ├── services/bot_reply.py  Esperar 15 s y contestar al cliente
     │   ├── services/agents.py  Agente del negocio e historial que se le manda a la IA
     │   ├── services/auth.py    Sesiones del panel: entrar, renovar, cerrar, freno a intentos
+    │   ├── services/members.py Qué puede hacer cada rol, miembros e invitaciones
+    │   ├── services/audit.py   Registro de quién hizo qué (audit_logs)
     │   ├── integrations/llm.py  Cliente de Claude (Anthropic)
     │   ├── workers/ingest.py   Worker ARQ de la cola ingest (+ barrido cada minuto)
     │   ├── integrations/evolution/  Cliente de Evolution API (instancias, QR, estado)
@@ -61,7 +65,7 @@ El diseño completo está en el documento de la Fase 1.
     │   ├── db/base.py          Clase Base, convención de nombres y piezas comunes
     │   ├── db/ids.py           Generador de UUID v7
     │   ├── db/session.py       Conexión y sesiones con el negocio activo (RLS)
-    │   └── models/             Un archivo por tabla (19) + enums.py
+    │   └── models/             Un archivo por tabla (20) + enums.py
     ├── migrations/
     │   ├── env.py              Cómo se conecta Alembic
     │   └── versions/0001_...   Esquema inicial: tablas, índices, ENUM y RLS
@@ -220,6 +224,35 @@ La contraseña se pide en la terminal (mínimo 10 caracteres) y no se ve al escr
 - Si alguien usa una cookie de renovación ya usada (copiada), se cierran todas las
   sesiones de ese usuario.
 - Con la API en marcha, `http://127.0.0.1:8000/docs` permite probar las rutas.
+
+## Negocio, miembros y roles
+
+Rutas del negocio que la persona eligió al entrar (necesitan el pase de acceso):
+
+| Ruta | Qué hace | Quién puede |
+| --- | --- | --- |
+| `GET /tenant` | Datos del negocio y mi rol | Todos |
+| `PATCH /tenant` | Cambiar nombre, país o zona horaria | Dueño y administrador |
+| `GET /tenant/members` | Quiénes tienen acceso y con qué rol | Todos |
+| `PATCH /tenant/members/{user_id}` | Cambiar el rol de alguien | Dueño (a todos), administrador (solo agentes) |
+| `DELETE /tenant/members/{user_id}` | Quitar el acceso (con el propio id: salir del negocio) | Igual que arriba; salir, todos |
+| `GET /tenant/invitations` | Invitaciones sin usar | Dueño y administrador |
+| `POST /tenant/invitations` | Invitar un correo con un rol: devuelve el enlace | Dueño (cualquier rol), administrador (agentes) |
+| `DELETE /tenant/invitations/{id}` | Anular una invitación | Igual que arriba |
+
+La persona invitada abre el enlace (vence a las 72 horas y sirve una sola vez):
+
+| Ruta | Qué hace |
+| --- | --- |
+| `POST /auth/invitations/preview` | Qué negocio la invita, con qué correo y si ya tiene cuenta |
+| `POST /auth/invitations/accept` | Sin cuenta: nombre y contraseña nueva. Con cuenta: su contraseña de siempre. Queda dentro, con ese negocio elegido |
+
+- Nadie cambia su propio rol, y el negocio siempre conserva al menos un dueño.
+- El rol se lee de la base en cada petición: quitar el acceso vale al instante.
+- El enlace se muestra una sola vez; la base guarda solo su huella. `PANEL_URL` del
+  `.env` dice a qué dirección apunta.
+- Cada cambio queda en `audit_logs` (quién, qué, cuándo y desde qué IP).
+- La migración 0006 crea la tabla `tenant_invitations`, con RLS como el resto.
 
 ## Dos usuarios de base de datos
 

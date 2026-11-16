@@ -45,6 +45,8 @@ class Settings(BaseSettings):
     jwt_secret: SecretStr = SecretStr("")
     # Direcciones desde las que el panel web llama a la API (separadas por coma).
     panel_origins: str = "http://127.0.0.1:5173,http://localhost:5173"
+    # Dirección del panel con la que se arman los enlaces de invitación (bloque 5.2).
+    panel_url: str = "http://127.0.0.1:5173"
 
 
 @lru_cache
