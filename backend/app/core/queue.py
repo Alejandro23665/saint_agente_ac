@@ -14,11 +14,11 @@ def redis_settings(url: str) -> RedisSettings:
     return RedisSettings.from_dsn(url)
 
 
-def create_queue_pool(url: str) -> ArqRedis:
+def create_queue_pool(url: str, queue_name: str = INGEST_QUEUE) -> ArqRedis:
     """Conexión para encolar. No se conecta hasta el primer uso: si Redis está caído
     al arrancar, la API arranca igual (y /health lo avisa)."""
     pool = ConnectionPool.from_url(url, socket_connect_timeout=2, socket_timeout=2)
-    return ArqRedis(connection_pool=pool, default_queue_name=INGEST_QUEUE)
+    return ArqRedis(connection_pool=pool, default_queue_name=queue_name)
 
 
 def webhook_job_id(event_id: uuid.UUID) -> str:
@@ -34,6 +34,7 @@ async def enqueue_webhook_event(pool: ArqRedis, event_id: uuid.UUID, tenant_id: 
         str(event_id),
         str(tenant_id),
         _job_id=webhook_job_id(event_id),
-        _queue_name=INGEST_QUEUE,
+        # La cola de la conexión: saint:ingest (las pruebas usan otra para no mezclarse).
+        _queue_name=pool.default_queue_name,
     )
     return job is not None
