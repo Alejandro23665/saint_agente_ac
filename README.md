@@ -22,7 +22,8 @@ El diseño completo está en el documento de la Fase 1.
 | 4.4 a 4.8 | Conocimiento, RAG, pasar a humano, notas de voz y prueba final | Pendientes (falta la clave de OpenRouter) |
 | 5.1 | Inicio de sesión del panel: contraseñas argon2, pase JWT de 15 min y sesión de 7 días | Lista (PR #13) |
 | 5.2 | Negocio, miembros y roles; invitar con enlace de un solo uso | Lista (PR #14) |
-| 5.3 | Números de WhatsApp desde el panel: conectar con QR, estado, grupos, desconectar | Esta rama |
+| 5.3 | Números de WhatsApp desde el panel: conectar con QR, estado, grupos, desconectar | Lista (PR #15) |
+| 5.4 | Bandeja de conversaciones: leer, contestar como persona, tomar y devolver al bot | Esta rama |
 
 ## Estructura
 
@@ -41,6 +42,7 @@ El diseño completo está en el documento de la Fase 1.
     │   ├── api/auth.py         /auth/...: entrar, renovar, elegir negocio, quién soy, salir, aceptar invitación
     │   ├── api/tenant.py       /tenant/...: datos del negocio, miembros, roles e invitaciones
     │   ├── api/numbers.py      /numbers/...: conectar números con QR, estado, grupos, borrar
+    │   ├── api/conversations.py  /conversations/...: bandeja, mensajes, contestar, tomar, devolver
     │   ├── core/config.py      Lee la configuración del .env
     │   ├── core/redis.py       Conexión a Redis
     │   ├── core/queue.py       Cola ingest (ARQ): nombre y cómo encolar
@@ -58,6 +60,7 @@ El diseño completo está en el documento de la Fase 1.
     │   ├── services/members.py Qué puede hacer cada rol, miembros e invitaciones
     │   ├── services/audit.py   Registro de quién hizo qué (audit_logs)
     │   ├── services/numbers.py Números del negocio desde el panel y quién puede tocarlos
+    │   ├── services/inbox.py   Bandeja: listar, leer, contestar, tomar, devolver, asignar, cerrar
     │   ├── integrations/llm.py  Cliente de Claude (Anthropic)
     │   ├── workers/ingest.py   Worker ARQ de la cola ingest (+ barrido cada minuto)
     │   ├── integrations/evolution/  Cliente de Evolution API (instancias, QR, estado)
@@ -272,6 +275,23 @@ La persona invitada abre el enlace (vence a las 72 horas y sirve una sola vez):
 - Hasta 5 números por negocio.
 - El QR llega como imagen lista para mostrar (`data:image/png;base64,...`).
 - Si Evolution no responde, la API contesta 502 y no deja nada a medias.
+
+## Bandeja de conversaciones
+
+| Ruta | Qué hace |
+| --- | --- |
+| `GET /conversations` | La bandeja, la más reciente primero. Filtros: `status`, `mode`, `mine`, `number_id`, `q` (nombre o teléfono); página siguiente con `before` |
+| `GET /conversations/{id}` | Una conversación (contacto, número, asignada a, esperando respuesta) |
+| `GET /conversations/{id}/messages` | Sus mensajes, el más viejo arriba; más antiguos con `before` |
+| `POST /conversations/{id}/messages` | Contestar como persona (queda en la cola de salida) |
+| `POST /conversations/{id}/take` | Tomarla: el bot deja de contestar y queda asignada a quien la tomó |
+| `POST /conversations/{id}/release` | Devolverla al bot |
+| `POST /conversations/{id}/assign` | Asignarla a alguien del negocio (dueño y administrador) |
+| `POST /conversations/{id}/close` | Cerrarla; si el cliente vuelve a escribir se abre una nueva |
+
+- Todos los roles ven la bandeja y contestan.
+- Contestar en una conversación del bot la pasa a modo humano, para que el bot no
+  responda encima. Cada cambio entre bot y humano queda en `handoff_events`.
 
 ## Dos usuarios de base de datos
 
