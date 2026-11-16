@@ -2,6 +2,7 @@
 
 from functools import lru_cache
 
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -18,6 +19,10 @@ class Settings(BaseSettings):
     app_db_user: str = "saint_app"
 
     redis_url: str = "redis://localhost:6379/0"
+
+    # Evolution API. SecretStr evita que la clave aparezca si se imprime la configuración.
+    evolution_base_url: str = "http://localhost:8080"
+    evolution_api_key: SecretStr = SecretStr("")
 
 
 @lru_cache

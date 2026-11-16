@@ -12,11 +12,11 @@ dependencies = [
     "fastapi>=0.125,<0.200",
     "uvicorn[standard]>=0.38,<1",
     "redis>=7,<8",
+    "httpx>=0.28,<1",
 ]
 
 [dependency-groups]
 dev = [
-    "httpx>=0.28,<1",
     "pytest>=9.2,<10",
     "pytest-asyncio>=1.5,<2",
     "ruff>=0.17,<0.18",
