@@ -20,9 +20,11 @@ from typing import Annotated
 from arq.connections import ArqRedis
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field
+from redis.asyncio import Redis
 
-from app.api.auth import Factory, client_ip, current_member
+from app.api.auth import Factory, client_ip, current_member, get_redis
 from app.api.webhooks import get_queue
+from app.core import events
 from app.core.queue import enqueue_outbound
 from app.models.enums import ConversationMode, ConversationStatus
 from app.services import inbox, members
@@ -33,6 +35,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/conversations", tags=["bandeja de conversaciones"])
 
 CurrentMember = Annotated[Member, Depends(current_member)]
+RedisDep = Annotated[Redis, Depends(get_redis)]
 
 
 # --- Lo que recibe y devuelve la API ---
@@ -139,6 +142,13 @@ ERRORS = (
 )
 
 
+async def _changed(redis: Redis, member: Member, conversation_id: uuid.UUID) -> None:
+    """Avisa a los paneles abiertos del negocio que esta conversación cambió."""
+    await events.publish(
+        redis, member.tenant_id, events.CONVERSATION_CHANGED, conversation_id=conversation_id
+    )
+
+
 def _done() -> Response:
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -224,6 +234,7 @@ async def reply(
     member: CurrentMember,
     factory: Factory,
     queue: Annotated[ArqRedis, Depends(get_queue)],
+    redis: RedisDep,
 ) -> ReplyOut:
     """202: el mensaje quedó en la cola de salida; el estado (sent, delivered...) se ve
     después en los mensajes de la conversación."""
@@ -236,24 +247,31 @@ async def reply(
         await enqueue_outbound(queue, message_id, member.tenant_id)
     except Exception:
         logger.exception("No se pudo encolar %s; lo enviará el barrido del worker", message_id)
+    await _changed(redis, member, conversation_id)
     return ReplyOut(message_id=message_id)
 
 
 @router.post("/{conversation_id}/take", status_code=status.HTTP_204_NO_CONTENT)
-async def take(conversation_id: uuid.UUID, member: CurrentMember, factory: Factory) -> Response:
+async def take(
+    conversation_id: uuid.UUID, member: CurrentMember, factory: Factory, redis: RedisDep
+) -> Response:
     try:
         await inbox.take(member, conversation_id, factory=factory)
     except ERRORS as exc:
         raise _http_error(exc) from exc
+    await _changed(redis, member, conversation_id)
     return _done()
 
 
 @router.post("/{conversation_id}/release", status_code=status.HTTP_204_NO_CONTENT)
-async def release(conversation_id: uuid.UUID, member: CurrentMember, factory: Factory) -> Response:
+async def release(
+    conversation_id: uuid.UUID, member: CurrentMember, factory: Factory, redis: RedisDep
+) -> Response:
     try:
         await inbox.release(member, conversation_id, factory=factory)
     except ERRORS as exc:
         raise _http_error(exc) from exc
+    await _changed(redis, member, conversation_id)
     return _done()
 
 
@@ -264,6 +282,7 @@ async def assign(
     member: CurrentMember,
     factory: Factory,
     request: Request,
+    redis: RedisDep,
 ) -> Response:
     try:
         await inbox.assign(
@@ -271,15 +290,21 @@ async def assign(
         )
     except ERRORS as exc:
         raise _http_error(exc) from exc
+    await _changed(redis, member, conversation_id)
     return _done()
 
 
 @router.post("/{conversation_id}/close", status_code=status.HTTP_204_NO_CONTENT)
 async def close(
-    conversation_id: uuid.UUID, member: CurrentMember, factory: Factory, request: Request
+    conversation_id: uuid.UUID,
+    member: CurrentMember,
+    factory: Factory,
+    request: Request,
+    redis: RedisDep,
 ) -> Response:
     try:
         await inbox.close(member, conversation_id, ip=client_ip(request), factory=factory)
     except ERRORS as exc:
         raise _http_error(exc) from exc
+    await _changed(redis, member, conversation_id)
     return _done()

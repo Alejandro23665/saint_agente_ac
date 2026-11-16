@@ -18,8 +18,10 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
+from redis.asyncio import Redis
 
-from app.api.auth import Factory, client_ip, current_member
+from app.api.auth import Factory, client_ip, current_member, get_redis
+from app.core import events
 from app.integrations.evolution import EvolutionClient, EvolutionError
 from app.services import members, numbers
 from app.services.members import Member
@@ -27,6 +29,7 @@ from app.services.members import Member
 router = APIRouter(prefix="/numbers", tags=["números de WhatsApp"])
 
 CurrentMember = Annotated[Member, Depends(current_member)]
+RedisDep = Annotated[Redis, Depends(get_redis)]
 EVOLUTION_DOWN = "No se pudo hablar con WhatsApp en este momento. Intenta de nuevo en un rato."
 
 
@@ -124,6 +127,11 @@ ERRORS = (
 # --- Rutas ---
 
 
+async def _changed(redis: Redis, member: Member) -> None:
+    """Avisa a los paneles abiertos del negocio que la lista de números cambió."""
+    await events.publish(redis, member.tenant_id, events.NUMBERS_CHANGED)
+
+
 @router.get("", response_model=list[NumberOut])
 async def list_numbers(member: CurrentMember, factory: Factory) -> list[NumberOut]:
     return [_out(n) for n in await numbers.list_numbers(member, factory=factory)]
@@ -131,7 +139,12 @@ async def list_numbers(member: CurrentMember, factory: Factory) -> list[NumberOu
 
 @router.post("", response_model=NumberWithQrOut, status_code=status.HTTP_201_CREATED)
 async def connect_number(
-    body: ConnectIn, member: CurrentMember, factory: Factory, evo: Evolution, request: Request
+    body: ConnectIn,
+    member: CurrentMember,
+    factory: Factory,
+    evo: Evolution,
+    request: Request,
+    redis: RedisDep,
 ) -> NumberWithQrOut:
     try:
         result = await numbers.connect_number(
@@ -139,6 +152,7 @@ async def connect_number(
         )
     except ERRORS as exc:
         raise _http_error(exc) from exc
+    await _changed(redis, member)
     return _with_qr(result)
 
 
@@ -171,6 +185,7 @@ async def update_number(
     factory: Factory,
     evo: Evolution,
     request: Request,
+    redis: RedisDep,
 ) -> NumberOut:
     try:
         result = await numbers.set_groups(
@@ -178,12 +193,18 @@ async def update_number(
         )
     except ERRORS as exc:
         raise _http_error(exc) from exc
+    await _changed(redis, member)
     return _out(result)
 
 
 @router.post("/{number_id}/disconnect", response_model=NumberOut)
 async def disconnect_number(
-    number_id: uuid.UUID, member: CurrentMember, factory: Factory, evo: Evolution, request: Request
+    number_id: uuid.UUID,
+    member: CurrentMember,
+    factory: Factory,
+    evo: Evolution,
+    request: Request,
+    redis: RedisDep,
 ) -> NumberOut:
     try:
         result = await numbers.disconnect_number(
@@ -191,15 +212,22 @@ async def disconnect_number(
         )
     except ERRORS as exc:
         raise _http_error(exc) from exc
+    await _changed(redis, member)
     return _out(result)
 
 
 @router.delete("/{number_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_number(
-    number_id: uuid.UUID, member: CurrentMember, factory: Factory, evo: Evolution, request: Request
+    number_id: uuid.UUID,
+    member: CurrentMember,
+    factory: Factory,
+    evo: Evolution,
+    request: Request,
+    redis: RedisDep,
 ) -> Response:
     try:
         await numbers.delete_number(member, evo, number_id, ip=client_ip(request), factory=factory)
     except ERRORS as exc:
         raise _http_error(exc) from exc
+    await _changed(redis, member)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
