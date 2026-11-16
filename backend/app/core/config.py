@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     # Si se pierde, los tokens cifrados ya no se pueden leer.
     fernet_key: SecretStr = SecretStr("")
 
+    # Solo para pruebas: si tiene teléfonos (separados por coma), el bot contesta
+    # únicamente a esos números. Vacío = contesta a todos los clientes.
+    bot_test_phones: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -1,4 +1,4 @@
-"""Worker de Saint: procesa los avisos de Evolution y envía los mensajes salientes.
+"""Worker de Saint: procesa los avisos de Evolution, contesta y envía los mensajes.
 
 Para arrancarlo (en otra terminal, junto a la API):
     uv run arq app.workers.ingest.WorkerSettings
@@ -16,13 +16,21 @@ from app.core.config import get_settings
 from app.core.queue import (
     INGEST_QUEUE,
     PROCESS_WEBHOOK_EVENT,
+    REPLY_TO_CONVERSATION,
     SEND_OUTBOUND_MESSAGE,
     enqueue_outbound,
+    enqueue_reply,
     enqueue_webhook_event,
     redis_settings,
 )
 from app.db.session import build_engine
 from app.integrations.evolution import EvolutionClient
+from app.services.bot_reply import (
+    DEBOUNCE_SECONDS,
+    ReplyOutcome,
+    answer_conversation,
+    find_conversations_awaiting_reply,
+)
 from app.services.outbound import SendOutcome, find_queued_messages, send_queued_message
 from app.services.webhook_processing import (
     MAX_ATTEMPTS,
@@ -37,6 +45,9 @@ logger = logging.getLogger(__name__)
 RETRY_BASE_SECONDS = 10
 # Intentos de envío de un mensaje antes de marcarlo como 'failed'.
 MAX_SEND_TRIES = 5
+# Cada vez que el cliente sigue escribiendo, el trabajo de respuesta se aplaza (Retry).
+# Con la espera máxima de 2 min nunca llega a tantos; es solo un tope de seguridad.
+MAX_REPLY_TRIES = 200
 
 
 async def startup(ctx: dict[str, Any]) -> None:
@@ -55,6 +66,12 @@ async def process_webhook_event(ctx: dict[str, Any], event_id: str, tenant_id: s
     result = await process_event(uuid.UUID(event_id), uuid.UUID(tenant_id), factory=ctx["factory"])
     if result.outcome == Outcome.RETRY:
         raise Retry(defer=RETRY_BASE_SECONDS * 2 ** (result.attempts - 1))
+    if result.reply_conversation_id is not None:
+        # Mensaje nuevo del cliente: la respuesta sale dentro de 15 s si no escribe más.
+        # Si ya había una respuesta programada para este chat, no se crea otra.
+        await enqueue_reply(
+            ctx["redis"], result.reply_conversation_id, uuid.UUID(tenant_id), DEBOUNCE_SECONDS
+        )
     return result.outcome.value
 
 
@@ -71,13 +88,29 @@ async def send_outbound_message(ctx: dict[str, Any], message_id: str, tenant_id:
     return result.outcome.value
 
 
+async def reply_to_conversation(ctx: dict[str, Any], conversation_id: str, tenant_id: str) -> str:
+    result = await answer_conversation(
+        uuid.UUID(conversation_id), uuid.UUID(tenant_id), factory=ctx["factory"]
+    )
+    if result.outcome == ReplyOutcome.WAIT:
+        # El cliente escribió hace menos de 15 s: volver a mirar cuando se cumplan.
+        raise Retry(defer=result.wait_seconds)
+    if result.outcome == ReplyOutcome.REPLIED:
+        await enqueue_outbound(ctx["redis"], result.message_id, uuid.UUID(tenant_id))
+    return result.outcome.value
+
+
 async def requeue_stuck_events(ctx: dict[str, Any]) -> int:
-    """Cada minuto: vuelve a encolar avisos y mensajes salientes que quedaron sin encolar."""
+    """Cada minuto: vuelve a encolar avisos, respuestas y envíos que quedaron sin encolar."""
     queued = 0
     for event_id, tenant_id in await find_stuck_events(factory=ctx["factory"]):
         queued += await enqueue_webhook_event(ctx["redis"], event_id, tenant_id)
     for message_id, tenant_id in await find_queued_messages(factory=ctx["factory"]):
         queued += await enqueue_outbound(ctx["redis"], message_id, tenant_id)
+    for conversation_id, tenant_id in await find_conversations_awaiting_reply(
+        factory=ctx["factory"]
+    ):
+        queued += await enqueue_reply(ctx["redis"], conversation_id, tenant_id, 0)
     if queued:
         logger.info("Barrido: %s trabajos pendientes vueltos a encolar", queued)
     return queued
@@ -87,6 +120,14 @@ class WorkerSettings:
     functions = [
         func(process_webhook_event, name=PROCESS_WEBHOOK_EVENT),
         func(send_outbound_message, name=SEND_OUTBOUND_MESSAGE),
+        # keep_result=0: al terminar se borra, y el próximo mensaje del cliente puede
+        # programar otra respuesta enseguida (con el mismo id de trabajo).
+        func(
+            reply_to_conversation,
+            name=REPLY_TO_CONVERSATION,
+            max_tries=MAX_REPLY_TRIES,
+            keep_result=0,
+        ),
     ]
     cron_jobs = [cron(requeue_stuck_events, second=0, run_at_startup=True)]
     on_startup = startup

@@ -27,7 +27,8 @@ MAX_ATTEMPTS = 5
 # El error se guarda recortado: basta para entender qué pasó.
 MAX_ERROR_LENGTH = 2000
 
-Handler = Callable[[AsyncSession, WebhookEvent], Awaitable[None]]
+# Un manejador puede devolver el id de una conversación a la que el bot debe contestar.
+Handler = Callable[[AsyncSession, WebhookEvent], Awaitable[uuid.UUID | None]]
 
 
 async def _nothing_to_do(session: AsyncSession, event: WebhookEvent) -> None:
@@ -57,6 +58,8 @@ class Result:
     outcome: Outcome
     attempts: int = 0
     error: str | None = None
+    # Conversación con un mensaje nuevo del cliente: el worker programa la respuesta.
+    reply_conversation_id: uuid.UUID | None = None
 
 
 async def process_event(
@@ -89,7 +92,7 @@ async def process_event(
             # Savepoint: si el manejador falla, solo se deshace lo que hizo él; el
             # contador de intentos y el error sí se guardan.
             async with session.begin_nested():
-                await handler(session, event)
+                reply_conversation_id = await handler(session, event)
         except Exception as exc:  # noqa: BLE001 - cualquier fallo cuenta como intento
             event.error = f"{type(exc).__name__}: {exc}"[:MAX_ERROR_LENGTH]
             if event.attempts >= MAX_ATTEMPTS:
@@ -102,7 +105,9 @@ async def process_event(
         event.status = WebhookEventStatus.PROCESSED
         event.error = None
         event.processed_at = func.now()
-        return Result(Outcome.PROCESSED, event.attempts)
+        return Result(
+            Outcome.PROCESSED, event.attempts, reply_conversation_id=reply_conversation_id
+        )
 
 
 async def find_stuck_events(
