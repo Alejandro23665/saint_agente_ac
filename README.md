@@ -49,6 +49,7 @@ El diseño completo está en el documento de la Fase 1.
     │   ├── api/conversations.py  /conversations/...: bandeja, mensajes, contestar, tomar, devolver
     │   ├── api/agent.py        /agent y /hours: instrucciones del bot, versiones y horario
     │   ├── api/events.py       GET /events: avisos en tiempo real para el panel
+    │   ├── api/knowledge.py    /knowledge/...: subir textos del negocio, ver estado, reintentar, borrar
     │   ├── core/config.py      Lee la configuración del .env
     │   ├── core/redis.py       Conexión a Redis
     │   ├── core/events.py      Publicar avisos al panel en el canal Redis del negocio
@@ -71,6 +72,7 @@ El diseño completo está en el documento de la Fase 1.
     │   ├── services/agent_settings.py  Instrucciones del agente (con versiones) y horario
     │   ├── services/hours.py   Validar el horario y saber si el negocio está abierto
     │   ├── services/knowledge.py  Conocimiento del negocio: fragmentos y embeddings
+    │   ├── services/knowledge_panel.py  El conocimiento desde el panel y quién puede tocarlo
     │   ├── integrations/llm.py  Cliente de Claude (Anthropic)
     │   ├── integrations/embeddings.py  Cliente de embeddings (OpenRouter)
     │   ├── workers/ingest.py   Worker ARQ de la cola ingest (+ barrido cada minuto)
@@ -365,6 +367,23 @@ uv run python -m app.scripts.cargar_conocimiento borrar panaderia-prueba panader
   título reemplaza al anterior; cargar el mismo texto otra vez no hace nada.
 - El modelo gratuito guarda lo que se le manda: carga solo información pública.
 - Todavía el bot no usa este conocimiento al responder: eso llega en el bloque 4.5.
+
+### Desde el panel
+
+| Ruta | Qué hace | Quién puede |
+| --- | --- | --- |
+| `GET /knowledge` | Los documentos y su estado | Todos |
+| `GET /knowledge/{id}` | Un documento con sus fragmentos | Todos |
+| `POST /knowledge` | Subir un texto (`{"title": ..., "text": ...}`, hasta 200 000 caracteres) | Dueño y administrador |
+| `POST /knowledge/{id}/retry` | Reintentar uno que falló | Dueño y administrador |
+| `DELETE /knowledge/{id}` | Borrarlo con sus fragmentos | Dueño y administrador |
+
+- Subir responde enseguida (202) con el documento en `processing`. El worker pide los
+  embeddings y lo deja `ready` o `failed`; al panel le llega `knowledge.changed` por
+  `/events`.
+- Sin `OPENROUTER_API_KEY`, queda `failed` con ese aviso. El texto queda guardado: al
+  poner la clave y reiniciar el worker, basta con reintentar.
+- Un texto nuevo con el mismo título reemplaza al viejo solo cuando el nuevo queda listo.
 
 ## Dos usuarios de base de datos
 

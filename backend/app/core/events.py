@@ -14,6 +14,8 @@ Tipos de aviso:
 - inbox.changed         {}                          algo cambió en la bandeja (por
                                                     ejemplo, un mensaje pasó a entregado)
 - numbers.changed       {}                          un número cambió de estado
+- knowledge.changed     {"source_id": "..."}        un documento del conocimiento se
+                                                    subió, quedó listo, falló o se borró
 """
 
 import json
@@ -28,6 +30,7 @@ logger = logging.getLogger(__name__)
 CONVERSATION_CHANGED = "conversation.changed"
 INBOX_CHANGED = "inbox.changed"
 NUMBERS_CHANGED = "numbers.changed"
+KNOWLEDGE_CHANGED = "knowledge.changed"
 
 
 def channel(tenant_id: uuid.UUID) -> str:

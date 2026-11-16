@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from app.core import events
 from app.core.config import get_settings
 from app.core.queue import (
+    EMBED_KNOWLEDGE_SOURCE,
     INGEST_QUEUE,
     PROCESS_WEBHOOK_EVENT,
     REPLY_TO_CONVERSATION,
@@ -25,6 +26,7 @@ from app.core.queue import (
     redis_settings,
 )
 from app.db.session import build_engine
+from app.integrations.embeddings import OpenRouterEmbedder
 from app.integrations.evolution import EvolutionClient
 from app.integrations.llm import AnthropicLLM
 from app.services.bot_reply import (
@@ -33,6 +35,7 @@ from app.services.bot_reply import (
     answer_conversation,
     find_conversations_awaiting_reply,
 )
+from app.services.knowledge import embed_source
 from app.services.outbound import SendOutcome, find_queued_messages, send_queued_message
 from app.services.webhook_processing import (
     MAX_ATTEMPTS,
@@ -62,12 +65,17 @@ async def startup(ctx: dict[str, Any]) -> None:
     ctx["llm"] = AnthropicLLM.from_settings(settings)
     if ctx["llm"] is None:
         logger.warning("Sin ANTHROPIC_API_KEY: el bot contestará con un eco, sin IA")
+    # Sin OPENROUTER_API_KEY queda en None: el conocimiento subido queda 'failed' con el
+    # aviso, y se reintenta desde el panel cuando la clave esté.
+    ctx["embedder"] = OpenRouterEmbedder.from_settings(settings)
 
 
 async def shutdown(ctx: dict[str, Any]) -> None:
     await ctx["evolution"].aclose()
     if ctx.get("llm") is not None:
         await ctx["llm"].aclose()
+    if ctx.get("embedder") is not None:
+        await ctx["embedder"].aclose()
     await ctx["engine"].dispose()
 
 
@@ -140,6 +148,22 @@ async def reply_to_conversation(ctx: dict[str, Any], conversation_id: str, tenan
     return result.outcome.value
 
 
+async def embed_knowledge_source(ctx: dict[str, Any], source_id: str, tenant_id: str) -> str:
+    """Pide los embeddings de un documento subido desde el panel (bloque 5.7)."""
+    result = await embed_source(
+        uuid.UUID(tenant_id),
+        uuid.UUID(source_id),
+        embedder=ctx.get("embedder"),
+        factory=ctx["factory"],
+    )
+    if result is None:
+        return "skipped"  # ya estaba listo o lo borraron
+    await events.publish(
+        ctx["redis"], uuid.UUID(tenant_id), events.KNOWLEDGE_CHANGED, source_id=source_id
+    )
+    return result.status.value
+
+
 async def requeue_stuck_events(ctx: dict[str, Any]) -> int:
     """Cada minuto: vuelve a encolar avisos, respuestas y envíos que quedaron sin encolar."""
     queued = 0
@@ -168,6 +192,9 @@ class WorkerSettings:
             max_tries=MAX_REPLY_TRIES,
             keep_result=0,
         ),
+        # Un intento: OpenRouter ya se reintenta por dentro; si falla, queda 'failed' y
+        # se reintenta desde el panel.
+        func(embed_knowledge_source, name=EMBED_KNOWLEDGE_SOURCE, max_tries=1),
     ]
     cron_jobs = [cron(requeue_stuck_events, second=0, run_at_startup=True)]
     on_startup = startup

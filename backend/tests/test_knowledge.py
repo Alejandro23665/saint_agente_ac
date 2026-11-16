@@ -244,7 +244,8 @@ async def test_si_openrouter_falla_queda_failed_y_se_puede_reintentar(tenant_id,
     assert result.status == ProcessingStatus.FAILED
     [source] = await sources(tenant_id, factory)
     assert (source.status, source.error) == (ProcessingStatus.FAILED, "OpenRouter respondió 503")
-    assert await chunks(tenant_id, factory) == []
+    # Los fragmentos quedan guardados, sin embedding, para el reintento.
+    assert all(c.embedding is None for c in await chunks(tenant_id, factory))
 
     retry = await load_text(
         tenant_id, "Horarios", HORARIOS, embedder=FakeEmbedder(), factory=factory

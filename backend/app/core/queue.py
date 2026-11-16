@@ -11,6 +11,7 @@ INGEST_QUEUE = "saint:ingest"
 PROCESS_WEBHOOK_EVENT = "process_webhook_event"
 SEND_OUTBOUND_MESSAGE = "send_outbound_message"
 REPLY_TO_CONVERSATION = "reply_to_conversation"
+EMBED_KNOWLEDGE_SOURCE = "embed_knowledge_source"
 
 
 def redis_settings(url: str) -> RedisSettings:
@@ -78,3 +79,17 @@ async def enqueue_reply(
         _queue_name=pool.default_queue_name,
     )
     return job is not None
+
+
+async def enqueue_knowledge(pool: ArqRedis, source_id: uuid.UUID, tenant_id: uuid.UUID) -> None:
+    """Encola el cálculo de embeddings de un documento del conocimiento (bloque 5.7).
+
+    Sin id de trabajo fijo: un reintento debe poder encolarse aunque ARQ aún recuerde el
+    trabajo anterior. Si por error corren dos a la vez, el segundo ve el documento ya
+    listo y no hace nada."""
+    await pool.enqueue_job(
+        EMBED_KNOWLEDGE_SOURCE,
+        str(source_id),
+        str(tenant_id),
+        _queue_name=pool.default_queue_name,
+    )
