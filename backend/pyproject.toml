@@ -18,6 +18,8 @@ dependencies = [
     "anthropic>=2.8,<3",
     "pyjwt>=2.10,<3",
     "argon2-cffi>=23.1,<26",
+    # Husos horarios (America/Caracas...): Windows no los trae y zoneinfo los necesita.
+    "tzdata>=2024.1",
 ]
 
 [dependency-groups]
