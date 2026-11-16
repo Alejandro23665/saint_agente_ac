@@ -194,6 +194,19 @@ class EvolutionClient:
             "POST", f"/webhook/set/{_path(name)}", json={"webhook": webhook.as_body()}
         )
 
+    async def set_groups(self, name: str, *, groups_enabled: bool) -> None:
+        """Enciende o apaga los mensajes de grupos. Evolution pide todos los ajustes juntos,
+        así que se mandan con los mismos valores que al crear la instancia."""
+        body = {
+            "groupsIgnore": not groups_enabled,
+            "rejectCall": False,
+            "alwaysOnline": False,
+            "readMessages": False,
+            "readStatus": False,
+            "syncFullHistory": False,
+        }
+        await self._request("POST", f"/settings/set/{_path(name)}", json=body)
+
     async def fetch_instance(self, name: str) -> InstanceInfo:
         """Datos de la instancia, incluido el número de teléfono una vez vinculado."""
         data = await self._request("GET", "/instance/fetchInstances", params={"instanceName": name})
