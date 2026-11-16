@@ -9,6 +9,7 @@ import uuid
 from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Agent, Conversation, Message, Tenant
@@ -62,17 +63,26 @@ async def get_agent(session: AsyncSession, conversation: Conversation) -> Agent:
         )
     )
     if agent is None:
+        # ON CONFLICT DO NOTHING: si otra conversación del mismo negocio lo crea a la vez,
+        # no falla; luego se lee el que quedó.
         tenant = await session.get(Tenant, conversation.tenant_id)
-        agent = Agent(
-            tenant_id=conversation.tenant_id,
-            key=DEFAULT_AGENT_KEY,
-            name="Atención al cliente",
-            kind=AgentKind.SPECIALIST,
-            system_prompt=DEFAULT_PROMPT.format(business=tenant.name),
-            model=DEFAULT_MODEL,
+        await session.execute(
+            insert(Agent)
+            .values(
+                tenant_id=conversation.tenant_id,
+                key=DEFAULT_AGENT_KEY,
+                name="Atención al cliente",
+                kind=AgentKind.SPECIALIST,
+                system_prompt=DEFAULT_PROMPT.format(business=tenant.name),
+                model=DEFAULT_MODEL,
+            )
+            .on_conflict_do_nothing(index_elements=["tenant_id", "key"])
         )
-        session.add(agent)
-        await session.flush()
+        agent = await session.scalar(
+            select(Agent).where(
+                Agent.tenant_id == conversation.tenant_id, Agent.key == DEFAULT_AGENT_KEY
+            )
+        )
     return agent
 
 

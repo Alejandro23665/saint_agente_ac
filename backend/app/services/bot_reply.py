@@ -130,6 +130,8 @@ async def answer_conversation(
         agent_id, agent_version = agent.id, agent.current_version
         model, system = agent.model, agent.system_prompt
         history = await agents.build_history(session, conversation_id)
+        # Lo que salga del negocio después de este momento hace inútil la respuesta.
+        snapshot_at = await session.scalar(select(func.clock_timestamp()))
         if not history or history[-1]["role"] != "user":
             # Alguien del negocio ya contestó después de estos mensajes.
             await _mark_processed(session, pending_ids)
@@ -148,8 +150,23 @@ async def answer_conversation(
     # 3) Guardar. Si mientras tanto el cliente escribió otra cosa, esta respuesta ya no
     #    sirve: se descarta y se vuelve a esperar los 15 s para contestar todo junto.
     async with tenant_session(tenant_id, factory=factory) as session:
-        await session.execute(
-            select(Conversation.id).where(Conversation.id == conversation_id).with_for_update()
+        conversation, contact = (
+            await session.execute(
+                select(Conversation, Contact)
+                .join(Contact, Contact.id == Conversation.contact_id)
+                .where(Conversation.id == conversation_id)
+                .with_for_update(of=Conversation)
+            )
+        ).one()
+        # ¿Alguien del negocio contestó mientras la IA escribía (desde su teléfono)?
+        answered = await session.scalar(
+            select(func.count())
+            .select_from(Message)
+            .where(
+                Message.conversation_id == conversation_id,
+                Message.direction == MessageDirection.OUTBOUND,
+                Message.created_at > snapshot_at,
+            )
         )
         newer = await session.scalar(
             select(func.count())
@@ -174,6 +191,12 @@ async def answer_conversation(
             status=LLMRunStatus.OK,
         )
         session.add(run)
+
+        if not _bot_answers(conversation, contact) or answered:
+            # La conversación pasó a una persona o ya le contestaron: no se envía.
+            run.status = LLMRunStatus.DISCARDED
+            await _mark_processed(session, pending_ids)
+            return ReplyResult(ReplyOutcome.NOT_BOT if not answered else ReplyOutcome.NOTHING)
 
         if newer:
             run.status = LLMRunStatus.DISCARDED

@@ -217,3 +217,57 @@ async def test_error_de_anthropic() -> None:
         await llm.reply(model="m", system="s", messages=[{"role": "user", "content": "Hola"}])
     await llm.aclose()
     assert info.value.permanent
+
+
+async def test_si_el_dueno_contesta_mientras_la_ia_escribe(chat: Chat) -> None:
+    await chat.receive(upsert("M1", text="Hola"))
+    await chat.age(16)
+
+    async def owner_answers():
+        await chat.receive(upsert("M2", text="Hola, ya te atiendo", from_me=True))
+
+    result = await answer(chat, FakeLLM(during=owner_answers))
+    assert result.outcome == ReplyOutcome.NOTHING
+    [run] = await runs(chat)
+    assert run.status == LLMRunStatus.DISCARDED
+    assert [m.sender_type for m in await chat.messages()] == [
+        SenderType.CONTACT,
+        SenderType.HUMAN_PHONE,
+    ]
+
+
+async def test_si_pasa_a_una_persona_mientras_la_ia_escribe(chat: Chat) -> None:
+    from sqlalchemy import update
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from app.models import Conversation
+    from app.models.enums import ConversationMode
+
+    await chat.receive(upsert("M1"))
+    await chat.age(16)
+
+    async def handoff():
+        async with AsyncSession(chat.owner_engine) as s, s.begin():
+            await s.execute(update(Conversation).values(mode=ConversationMode.HUMAN))
+
+    assert (await answer(chat, FakeLLM(during=handoff))).outcome == ReplyOutcome.NOT_BOT
+    assert len(await chat.messages()) == 1
+
+
+@pytest.mark.parametrize(
+    ("status", "permanent"), [(404, True), (413, True), (429, False), (529, False)]
+)
+async def test_errores_permanentes_y_pasajeros(status: int, permanent: bool) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            status, json={"type": "error", "error": {"type": "x", "message": "x"}}
+        )
+
+    llm = AnthropicLLM(
+        "sk-ant-x", http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    )
+    llm._client = llm._client.with_options(max_retries=0)
+    with pytest.raises(LLMError) as info:
+        await llm.reply(model="m", system="s", messages=[{"role": "user", "content": "Hola"}])
+    await llm.aclose()
+    assert info.value.permanent is permanent

@@ -79,8 +79,13 @@ class AnthropicLLM:
             )
         except (anthropic.AuthenticationError, anthropic.PermissionDeniedError) as exc:
             raise LLMError(f"Anthropic rechazó la clave: {exc}", permanent=True) from exc
-        except anthropic.BadRequestError as exc:
-            raise LLMError(f"Petición inválida para Anthropic: {exc}", permanent=True) from exc
+        except anthropic.APIStatusError as exc:
+            # 4xx (salvo 408 tiempo, 409 conflicto y 429 límite): repetir la misma petición
+            # dará el mismo error (modelo que no existe, petición demasiado grande...).
+            permanent = 400 <= exc.status_code < 500 and exc.status_code not in (408, 409, 429)
+            raise LLMError(
+                f"Anthropic respondió {exc.status_code}: {exc}", permanent=permanent
+            ) from exc
         except anthropic.APIError as exc:
             raise LLMError(f"Anthropic no respondió bien: {exc}") from exc
 
