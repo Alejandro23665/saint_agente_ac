@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     # únicamente a esos números. Vacío = contesta a todos los clientes.
     bot_test_phones: str = ""
 
+    # Clave de Anthropic (modelo de IA del bot). Sin clave, el bot contesta con un eco.
+    anthropic_api_key: SecretStr = SecretStr("")
+
 
 @lru_cache
 def get_settings() -> Settings:
