@@ -40,6 +40,10 @@ class Settings(BaseSettings):
     # Clave de Anthropic (modelo de IA del bot). Sin clave, el bot contesta con un eco.
     anthropic_api_key: SecretStr = SecretStr("")
 
+    # OpenRouter: convierte el conocimiento del negocio en embeddings (bloque 4.4).
+    openrouter_api_key: SecretStr = SecretStr("")
+    embedding_model: str = "nvidia/nemotron-3.5-embed-8b:free"
+
 
 @lru_cache
 def get_settings() -> Settings:
