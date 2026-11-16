@@ -25,6 +25,7 @@ from app.core.queue import (
 )
 from app.db.session import build_engine
 from app.integrations.evolution import EvolutionClient
+from app.integrations.llm import AnthropicLLM
 from app.services.bot_reply import (
     DEBOUNCE_SECONDS,
     ReplyOutcome,
@@ -55,10 +56,16 @@ async def startup(ctx: dict[str, Any]) -> None:
     ctx["engine"] = build_engine(settings.database_url)
     ctx["factory"] = async_sessionmaker(ctx["engine"], expire_on_commit=False)
     ctx["evolution"] = EvolutionClient.from_settings(settings)
+    # Sin ANTHROPIC_API_KEY queda en None y el bot contesta con un eco.
+    ctx["llm"] = AnthropicLLM.from_settings(settings)
+    if ctx["llm"] is None:
+        logger.warning("Sin ANTHROPIC_API_KEY: el bot contestará con un eco, sin IA")
 
 
 async def shutdown(ctx: dict[str, Any]) -> None:
     await ctx["evolution"].aclose()
+    if ctx.get("llm") is not None:
+        await ctx["llm"].aclose()
     await ctx["engine"].dispose()
 
 
@@ -90,10 +97,14 @@ async def send_outbound_message(ctx: dict[str, Any], message_id: str, tenant_id:
 
 async def reply_to_conversation(ctx: dict[str, Any], conversation_id: str, tenant_id: str) -> str:
     result = await answer_conversation(
-        uuid.UUID(conversation_id), uuid.UUID(tenant_id), factory=ctx["factory"]
+        uuid.UUID(conversation_id),
+        uuid.UUID(tenant_id),
+        llm=ctx.get("llm"),
+        factory=ctx["factory"],
     )
-    if result.outcome == ReplyOutcome.WAIT:
-        # El cliente escribió hace menos de 15 s: volver a mirar cuando se cumplan.
+    if result.outcome in (ReplyOutcome.WAIT, ReplyOutcome.ERROR):
+        # El cliente escribió hace menos de 15 s (o la IA falló un momento): volver a
+        # mirar cuando toque.
         raise Retry(defer=result.wait_seconds)
     if result.outcome == ReplyOutcome.REPLIED:
         await enqueue_outbound(ctx["redis"], result.message_id, uuid.UUID(tenant_id))

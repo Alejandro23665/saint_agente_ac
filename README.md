@@ -16,8 +16,9 @@ El diseño completo está en el documento de la Fase 1.
 | 3.5 | Cola ingest (ARQ): el worker procesa cada aviso, con reintentos | Lista (PR #6) |
 | 3.6 | Cada aviso de mensaje se convierte en contacto, conversación y mensaje | Lista (PR #7) |
 | 3.7 | Estado de conexión del número y prueba de punta a punta | Lista (PR #8) |
-| 4.1 | Enviar mensajes: cola de salida, reintentos y confirmación | PR #9 |
-| 4.2 | El bot espera 15 s a que el cliente termine y contesta (eco, sin IA) | Esta rama |
+| 4.1 | Enviar mensajes: cola de salida, reintentos y confirmación | Lista (PR #9) |
+| 4.2 | El bot espera 15 s a que el cliente termine y contesta (eco, sin IA) | Lista (PR #10) |
+| 4.3 | Respuesta con IA (Claude Haiku 5.5), agente del negocio y registro en `llm_runs` | Esta rama |
 
 ## Estructura
 
@@ -43,7 +44,9 @@ El diseño completo está en el documento de la Fase 1.
     │   ├── services/message_ingest.py  Aviso de mensaje -> contacto, conversación, mensaje
     │   ├── services/connection_events.py  Aviso de conexión -> estado del número
     │   ├── services/outbound.py  Cola de salida: guardar y enviar mensajes por Evolution
-    │   ├── services/bot_reply.py  Esperar 15 s y contestar al cliente (por ahora, un eco)
+    │   ├── services/bot_reply.py  Esperar 15 s y contestar al cliente
+    │   ├── services/agents.py  Agente del negocio e historial que se le manda a la IA
+    │   ├── integrations/llm.py  Cliente de Claude (Anthropic)
     │   ├── workers/ingest.py   Worker ARQ de la cola ingest (+ barrido cada minuto)
     │   ├── integrations/evolution/  Cliente de Evolution API (instancias, QR, estado)
     │   ├── scripts/evolution_qr.py  Prueba manual: conectar un WhatsApp con QR
@@ -169,8 +172,14 @@ uv run python -m app.scripts.enviar_mensaje panaderia-prueba "+58 412 1234567" "
 Cuando un cliente escribe, el worker programa la respuesta para dentro de 15 s. Si el
 cliente manda otro mensaje antes, la espera vuelve a empezar; si no para de escribir, se
 contesta igual a los 2 minutos. Luego el bot lee todos los mensajes pendientes juntos y
-contesta una sola vez. Por ahora la respuesta es un eco ("Recibí: ..."); en el bloque
-4.3 la escribirá la IA.
+contesta una sola vez.
+
+La respuesta la escribe Claude Haiku 5.5 con las instrucciones del agente del negocio
+(tabla `agents`; si no hay ninguno se crea uno básico) y los últimos 30 mensajes de la
+conversación. Cada llamada queda en `llm_runs` con sus tokens. Si el cliente escribe
+mientras la IA está respondiendo, esa respuesta se descarta y se contesta todo junto
+después. Sin `ANTHROPIC_API_KEY` en el `.env`, el bot responde con un eco
+("Recibí: ...").
 
 - No contesta si la conversación la atiende una persona (`mode` distinto de `bot`), en
   grupos, ni a mensajes de hace más de una hora.
