@@ -68,7 +68,8 @@ class EvolutionError(Exception):
 
 
 class EvolutionTimeout(EvolutionError):
-    """Evolution no respondió a tiempo: no sabemos si hizo lo que le pedimos.
+    """Evolution no respondió (tardó demasiado o se cortó la conexión a mitad): no
+    sabemos si hizo lo que le pedimos.
 
     En un envío esto importa: reintentar podría mandar el mensaje dos veces.
     """
@@ -224,12 +225,13 @@ class EvolutionClient:
     async def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         try:
             response = await self._http.request(method, path, **kwargs)
-        except (httpx.ReadTimeout, httpx.WriteTimeout) as exc:
-            # La petición salió, pero la respuesta no llegó a tiempo.
-            raise EvolutionTimeout(f"Evolution no respondió a tiempo: {exc!r}") from exc
-        except httpx.HTTPError as exc:
-            # No se pudo conectar: seguro que Evolution no hizo nada.
+        except (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout) as exc:
+            # No se pudo conectar: la petición no salió, seguro que Evolution no hizo nada.
             raise EvolutionError(f"No se pudo contactar a Evolution: {exc!r}") from exc
+        except httpx.HTTPError as exc:
+            # La petición salió, pero la respuesta no llegó (tardó demasiado o se cortó la
+            # conexión a mitad): no sabemos si Evolution la hizo.
+            raise EvolutionTimeout(f"Evolution no respondió: {exc!r}") from exc
         if response.is_error:
             raise EvolutionError(
                 f"Evolution respondió {response.status_code}: {_error_message(response)}",

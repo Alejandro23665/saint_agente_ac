@@ -154,14 +154,22 @@ async def test_numero_desconectado_espera(owner_engine, factory) -> None:
     assert (await load(factory, tenant_id, message_id)).status == MessageStatus.QUEUED
 
 
-async def test_timeout_no_reenvia_y_lo_confirma_send_message(owner_engine, factory) -> None:
-    """Si Evolution no responde a tiempo no reintentamos (se mandaría dos veces).
-    El aviso send.message de Evolution confirma que sí salió."""
+@pytest.mark.parametrize(
+    ("fail", "event_type"),
+    [
+        (httpx.ReadTimeout("lento"), "send.message"),
+        (httpx.RemoteProtocolError("se cortó"), "send.message"),
+        (httpx.ReadTimeout("lento"), "messages.upsert"),
+    ],
+)
+async def test_sin_respuesta_no_reenvia_y_lo_confirma_el_aviso(
+    owner_engine, factory, fail, event_type
+) -> None:
+    """Si Evolution no responde (tarda o se corta la conexión) no reintentamos: se
+    mandaría dos veces. El aviso de Evolution confirma que sí salió."""
     tenant_id, instance_id, _ = await new_number(owner_engine)
     message_id = await queue(factory, tenant_id, instance_id, "Abrimos a las 7")
-    result = await send(
-        FakeEvolution(fail=httpx.ReadTimeout("lento")), factory, tenant_id, message_id
-    )
+    result = await send(FakeEvolution(fail=fail), factory, tenant_id, message_id)
     assert result.outcome == SendOutcome.UNKNOWN
     assert (await load(factory, tenant_id, message_id)).status == MessageStatus.SENDING
 
@@ -175,9 +183,9 @@ async def test_timeout_no_reenvia_y_lo_confirma_send_message(owner_engine, facto
         event = WebhookEvent(
             tenant_id=tenant_id,
             channel_instance_id=instance_id,
-            event_type="send.message",
+            event_type=event_type,
             external_id="3EB0TARDE",
-            payload={"event": "send.message", "data": data},
+            payload={"event": event_type, "data": data},
         )
         s.add(event)
         await s.flush()
@@ -192,7 +200,38 @@ async def test_timeout_no_reenvia_y_lo_confirma_send_message(owner_engine, facto
             .select_from(Message)
             .where(Message.channel_instance_id == instance_id)
         )
+        conversation = await s.get(Conversation, message.conversation_id)
     assert count == 1  # no se creó un mensaje duplicado
+    assert conversation.last_outbound_at is not None
+
+
+async def test_foto_con_el_mismo_texto_no_confirma_un_texto(owner_engine, factory) -> None:
+    tenant_id, instance_id, _ = await new_number(owner_engine)
+    message_id = await queue(factory, tenant_id, instance_id, "Hola")
+    await send(FakeEvolution(fail=httpx.ReadTimeout("lento")), factory, tenant_id, message_id)
+    data = {
+        "key": {"remoteJid": JID, "fromMe": True, "id": "FOTO1"},
+        "message": {"imageMessage": {"caption": "Hola", "mimetype": "image/jpeg"}},
+        "messageType": "imageMessage",
+        "messageTimestamp": 1763250000,
+    }
+    async with AsyncSession(owner_engine) as s, s.begin():
+        event = WebhookEvent(
+            tenant_id=tenant_id,
+            channel_instance_id=instance_id,
+            event_type="send.message",
+            external_id="FOTO1",
+            payload={"event": "send.message", "data": data},
+        )
+        s.add(event)
+        await s.flush()
+        event_id = event.id
+    await process_event(event_id, tenant_id, factory=factory)
+    message = await load(factory, tenant_id, message_id)
+    assert (message.status, message.external_id) == (MessageStatus.SENDING, None)
+    async with tenant_session(tenant_id, factory=factory) as s:
+        photo = await s.scalar(select(Message).where(Message.external_id == "FOTO1"))
+    assert photo is not None and photo.media == {"mime_type": "image/jpeg"}
 
 
 async def test_barrido_encuentra_los_que_quedaron_en_cola(owner_engine, factory) -> None:
