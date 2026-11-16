@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     panel_origins: str = "http://127.0.0.1:5173,http://localhost:5173"
     # Dirección del panel con la que se arman los enlaces de invitación (bloque 5.2).
     panel_url: str = "http://127.0.0.1:5173"
+    # OpenRouter: convierte el conocimiento del negocio en embeddings (bloque 4.4).
+    openrouter_api_key: SecretStr = SecretStr("")
+    embedding_model: str = "nvidia/nemotron-3.5-embed-8b:free"
 
 
 @lru_cache
