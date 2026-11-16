@@ -24,7 +24,8 @@ El diseño completo está en el documento de la Fase 1.
 | 5.2 | Negocio, miembros y roles; invitar con enlace de un solo uso | Lista (PR #14) |
 | 5.3 | Números de WhatsApp desde el panel: conectar con QR, estado, grupos, desconectar | Lista (PR #15) |
 | 5.4 | Bandeja de conversaciones: leer, contestar como persona, tomar y devolver al bot | Lista (PR #16) |
-| 5.5 | Instrucciones del agente con historial de versiones, y horario de atención | Esta rama |
+| 5.5 | Instrucciones del agente con historial de versiones, y horario de atención | Lista (PR #17) |
+| 5.6 | Bandeja en tiempo real: avisos al panel por `/events` (Redis + SSE) | Esta rama |
 
 ## Estructura
 
@@ -45,8 +46,10 @@ El diseño completo está en el documento de la Fase 1.
     │   ├── api/numbers.py      /numbers/...: conectar números con QR, estado, grupos, borrar
     │   ├── api/conversations.py  /conversations/...: bandeja, mensajes, contestar, tomar, devolver
     │   ├── api/agent.py        /agent y /hours: instrucciones del bot, versiones y horario
+    │   ├── api/events.py       GET /events: avisos en tiempo real para el panel
     │   ├── core/config.py      Lee la configuración del .env
     │   ├── core/redis.py       Conexión a Redis
+    │   ├── core/events.py      Publicar avisos al panel en el canal Redis del negocio
     │   ├── core/queue.py       Cola ingest (ARQ): nombre y cómo encolar
     │   ├── core/security.py    Cifrado (Fernet) y huellas de secretos
     │   ├── core/auth_tokens.py Contraseñas (argon2) y pases de acceso (JWT)
@@ -312,6 +315,32 @@ La persona invitada abre el enlace (vence a las 72 horas y sirve una sola vez):
 - El bot usa las instrucciones nuevas desde su siguiente respuesta.
 - Sin horario configurado, el negocio cuenta como abierto siempre. Qué hace el bot
   fuera de horario se programa en el bloque 4.6.
+
+## Bandeja en tiempo real
+
+El panel abre `GET /events` (con `Authorization: Bearer <pase>`) y la deja abierta.
+Cuando algo cambia en el negocio, la API o el worker publican un aviso en Redis
+(`saint:events:<negocio>`) y llega al panel así:
+
+```
+event: conversation.changed
+data: {"type": "conversation.changed", "conversation_id": "..."}
+```
+
+| Aviso | Cuándo |
+| --- | --- |
+| `conversation.changed` | Mensaje nuevo del cliente, respuesta del bot o de una persona, tomar, devolver, asignar, cerrar |
+| `inbox.changed` | Otro cambio en la bandeja, por ejemplo un mensaje que pasó a enviado o entregado |
+| `numbers.changed` | Un número se conectó, desconectó, cambió o se borró |
+| `session.expired` | Venció el pase o la persona perdió el acceso: el panel renueva y se reconecta |
+
+- El aviso lleva solo el tipo y un id, nunca el texto. El panel vuelve a pedir los datos
+  a la API, que sigue decidiendo qué puede ver cada persona.
+- Cada 15 s llega una línea `: ping` para que la conexión no se corte.
+- Si Redis falla, la acción igual se guarda; el panel lo verá al recargar.
+- Detrás de Caddy o nginx, la respuesta lleva `X-Accel-Buffering: no` para que no se guarde.
+
+Probarlo a mano: `curl -N -H "Authorization: Bearer <pase>" http://localhost:8000/events`
 
 ## Dos usuarios de base de datos
 

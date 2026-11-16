@@ -248,11 +248,18 @@ async def test_barrido_encuentra_los_que_quedaron_en_cola(owner_engine, factory)
     assert old_id in found and new_id not in found
 
 
+class NoPanel:
+    """Redis de mentira para los avisos al panel (aquí no se revisan)."""
+
+    async def publish(self, channel: str, payload: str) -> int:
+        return 0
+
+
 async def test_tarea_del_worker_pide_reintento(owner_engine, factory) -> None:
     tenant_id, instance_id, _ = await new_number(owner_engine, InstanceStatus.CONNECTING)
     message_id = await queue(factory, tenant_id, instance_id)
     async with FakeEvolution().client() as evo:
-        ctx = {"factory": factory, "evolution": evo, "job_try": 1}
+        ctx = {"factory": factory, "evolution": evo, "redis": NoPanel(), "job_try": 1}
         with pytest.raises(Retry):
             await ingest.send_outbound_message(ctx, str(message_id), str(tenant_id))
         ctx["job_try"] = ingest.MAX_SEND_TRIES

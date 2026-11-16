@@ -60,6 +60,8 @@ class Result:
     error: str | None = None
     # Conversación con un mensaje nuevo del cliente: el worker programa la respuesta.
     reply_conversation_id: uuid.UUID | None = None
+    # El tipo de aviso de Evolution (para saber qué avisar al panel).
+    event_type: str | None = None
 
 
 async def process_event(
@@ -106,7 +108,10 @@ async def process_event(
         event.error = None
         event.processed_at = func.now()
         return Result(
-            Outcome.PROCESSED, event.attempts, reply_conversation_id=reply_conversation_id
+            Outcome.PROCESSED,
+            event.attempts,
+            reply_conversation_id=reply_conversation_id,
+            event_type=event.event_type,
         )
 
 

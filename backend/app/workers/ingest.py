@@ -12,6 +12,7 @@ from arq import Retry, cron
 from arq.worker import func
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
+from app.core import events
 from app.core.config import get_settings
 from app.core.queue import (
     INGEST_QUEUE,
@@ -36,6 +37,7 @@ from app.services.outbound import SendOutcome, find_queued_messages, send_queued
 from app.services.webhook_processing import (
     MAX_ATTEMPTS,
     Outcome,
+    Result,
     find_stuck_events,
     process_event,
 )
@@ -73,6 +75,8 @@ async def process_webhook_event(ctx: dict[str, Any], event_id: str, tenant_id: s
     result = await process_event(uuid.UUID(event_id), uuid.UUID(tenant_id), factory=ctx["factory"])
     if result.outcome == Outcome.RETRY:
         raise Retry(defer=RETRY_BASE_SECONDS * 2 ** (result.attempts - 1))
+    if result.outcome == Outcome.PROCESSED:
+        await _notify_panel(ctx, uuid.UUID(tenant_id), result)
     if result.reply_conversation_id is not None:
         # Mensaje nuevo del cliente: la respuesta sale dentro de 15 s si no escribe más.
         # Si ya había una respuesta programada para este chat, no se crea otra.
@@ -80,6 +84,22 @@ async def process_webhook_event(ctx: dict[str, Any], event_id: str, tenant_id: s
             ctx["redis"], result.reply_conversation_id, uuid.UUID(tenant_id), DEBOUNCE_SECONDS
         )
     return result.outcome.value
+
+
+async def _notify_panel(ctx: dict[str, Any], tenant_id: uuid.UUID, result: Result) -> None:
+    """Avisa al panel de lo que acaba de cambiar (ya guardado en la base de datos)."""
+    if result.event_type == "connection.update":
+        await events.publish(ctx["redis"], tenant_id, events.NUMBERS_CHANGED)
+    elif result.reply_conversation_id is not None:
+        await events.publish(
+            ctx["redis"],
+            tenant_id,
+            events.CONVERSATION_CHANGED,
+            conversation_id=result.reply_conversation_id,
+        )
+    else:
+        # Por ejemplo, un mensaje que pasó a entregado o leído.
+        await events.publish(ctx["redis"], tenant_id, events.INBOX_CHANGED)
 
 
 async def send_outbound_message(ctx: dict[str, Any], message_id: str, tenant_id: str) -> str:
@@ -92,6 +112,9 @@ async def send_outbound_message(ctx: dict[str, Any], message_id: str, tenant_id:
     )
     if result.outcome == SendOutcome.RETRY:
         raise Retry(defer=RETRY_BASE_SECONDS * 2 ** (ctx.get("job_try", 1) - 1))
+    if result.outcome in (SendOutcome.SENT, SendOutcome.FAILED, SendOutcome.UNKNOWN):
+        # El mensaje cambió de estado (enviado o fallido): el panel lo muestra.
+        await events.publish(ctx["redis"], uuid.UUID(tenant_id), events.INBOX_CHANGED)
     return result.outcome.value
 
 
@@ -108,6 +131,12 @@ async def reply_to_conversation(ctx: dict[str, Any], conversation_id: str, tenan
         raise Retry(defer=result.wait_seconds)
     if result.outcome == ReplyOutcome.REPLIED:
         await enqueue_outbound(ctx["redis"], result.message_id, uuid.UUID(tenant_id))
+        await events.publish(
+            ctx["redis"],
+            uuid.UUID(tenant_id),
+            events.CONVERSATION_CHANGED,
+            conversation_id=conversation_id,
+        )
     return result.outcome.value
 
 
