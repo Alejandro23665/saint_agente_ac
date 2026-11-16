@@ -196,7 +196,7 @@ async def test_envio_por_api_y_upsert_del_mismo_mensaje(number: Number) -> None:
     await number.receive("send.message", sent)
     await number.receive("messages.upsert", sent)  # el mismo envío visto otra vez
     [message] = await number.all(Message)
-    assert message.sender_type == SenderType.BOT
+    assert message.sender_type == SenderType.SYSTEM  # no lo envió Saint
 
 
 async def test_estados_de_un_saliente(number: Number) -> None:

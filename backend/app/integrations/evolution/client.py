@@ -21,6 +21,7 @@ from app.integrations.evolution.schemas import (
     CreateInstanceResponse,
     InstanceInfo,
     QrCode,
+    SentMessage,
 )
 
 # Crear una instancia tarda ~5 s: Evolution espera a que Baileys genere el primer QR.
@@ -64,6 +65,14 @@ class EvolutionError(Exception):
     def __init__(self, message: str, status_code: int | None = None) -> None:
         super().__init__(message)
         self.status_code = status_code
+
+
+class EvolutionTimeout(EvolutionError):
+    """Evolution no respondió (tardó demasiado o se cortó la conexión a mitad): no
+    sabemos si hizo lo que le pedimos.
+
+    En un envío esto importa: reintentar podría mandar el mensaje dos veces.
+    """
 
 
 @dataclass(frozen=True)
@@ -192,6 +201,17 @@ class EvolutionClient:
             raise EvolutionError(f"Evolution no encontró la instancia {name!r}", 404)
         return InstanceInfo.model_validate(data[0])
 
+    async def send_text(self, name: str, to: str, text: str) -> SentMessage:
+        """Envía un texto por WhatsApp. `to` es el JID del contacto o su número.
+
+        Evolution muestra "escribiendo..." un instante y responde cuando WhatsApp
+        aceptó el mensaje. Si el número no tiene WhatsApp responde 400.
+        """
+        data = await self._request(
+            "POST", f"/message/sendText/{_path(name)}", json={"number": to, "text": text}
+        )
+        return SentMessage.model_validate(data)
+
     async def logout(self, name: str) -> None:
         """Desvincula el teléfono; la instancia queda creada y puede pedir otro QR."""
         await self._request("DELETE", f"/instance/logout/{_path(name)}")
@@ -205,8 +225,13 @@ class EvolutionClient:
     async def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         try:
             response = await self._http.request(method, path, **kwargs)
+        except (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout) as exc:
+            # No se pudo conectar: la petición no salió, seguro que Evolution no hizo nada.
+            raise EvolutionError(f"No se pudo contactar a Evolution: {exc!r}") from exc
         except httpx.HTTPError as exc:
-            raise EvolutionError(f"No se pudo contactar a Evolution: {exc}") from exc
+            # La petición salió, pero la respuesta no llegó (tardó demasiado o se cortó la
+            # conexión a mitad): no sabemos si Evolution la hizo.
+            raise EvolutionTimeout(f"Evolution no respondió: {exc!r}") from exc
         if response.is_error:
             raise EvolutionError(
                 f"Evolution respondió {response.status_code}: {_error_message(response)}",

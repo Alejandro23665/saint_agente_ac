@@ -234,14 +234,19 @@ async def store_message(
         logger.info("Aviso %s: mensaje de grupo y el número tiene grupos apagados", event.id)
         return None
 
+    outbound = parsed.from_me or sent_by_api
+    if outbound and await _confirm_our_send(session, event, parsed):
+        return None  # era un mensaje de Saint: ya tiene su fila
+
     contact_id = await upsert_contact(session, event.tenant_id, parsed)
     conversation_id = await open_conversation(
         session, event.tenant_id, event.channel_instance_id, contact_id
     )
 
-    outbound = parsed.from_me or sent_by_api
     if sent_by_api:
-        sender = SenderType.BOT
+        # Enviado por la API de Evolution pero no desde Saint (por ejemplo, desde el
+        # panel de Evolution): lo de Saint ya tiene su fila y se une en _confirm_our_send.
+        sender = SenderType.SYSTEM
     elif parsed.from_me:
         sender = SenderType.HUMAN_PHONE  # el dueño respondió desde su teléfono
     else:
@@ -296,7 +301,60 @@ async def handle_message_upsert(session: AsyncSession, event: WebhookEvent) -> N
 
 
 async def handle_send_message(session: AsyncSession, event: WebhookEvent) -> None:
+    """Confirmación de un envío por la API de Evolution (ver _confirm_our_send)."""
     await store_message(session, event, sent_by_api=True)
+
+
+async def _confirm_our_send(
+    session: AsyncSession, event: WebhookEvent, parsed: ParsedMessage
+) -> bool:
+    """Une el aviso de un envío con el mensaje de Saint que lo originó.
+
+    Casi siempre un saliente visto por Evolution es un mensaje que mandó Saint
+    (outbound.send_queued_message). El aviso puede llegar ANTES de que el worker guarde
+    el id de WhatsApp (o el worker nunca lo guarda, si Evolution no respondió a
+    tiempo), así que se busca nuestro mensaje en 'sending', sin id, para el mismo
+    contacto, del mismo tipo y con el mismo texto. Devuelve True si lo encontró.
+    """
+    already = await session.scalar(
+        select(Message.id).where(
+            Message.channel_instance_id == event.channel_instance_id,
+            Message.external_id == parsed.external_id,
+        )
+    )
+    if already is not None:
+        return False  # ya está guardado: el ON CONFLICT de store_message no lo duplica
+    ours = await session.scalar(
+        select(Message)
+        .join(Conversation, Conversation.id == Message.conversation_id)
+        .join(Contact, Contact.id == Conversation.contact_id)
+        .where(
+            Message.channel_instance_id == event.channel_instance_id,
+            Message.direction == MessageDirection.OUTBOUND,
+            Message.status == MessageStatus.SENDING,
+            Message.external_id.is_(None),
+            Message.content_type == parsed.content_type,
+            Message.text == parsed.text,
+            Contact.external_id == parsed.remote_jid,
+        )
+        .order_by(Message.created_at)
+        .limit(1)
+        .with_for_update(of=Message)
+    )
+    if ours is None:
+        return False
+    ours.external_id = parsed.external_id
+    ours.status = MessageStatus.SENT
+    moment = parsed.timestamp or datetime.now(UTC)
+    await session.execute(
+        update(Conversation)
+        .where(Conversation.id == ours.conversation_id)
+        .values(
+            last_outbound_at=func.greatest(Conversation.last_outbound_at, moment),
+            last_message_at=func.greatest(Conversation.last_message_at, moment),
+        )
+    )
+    return True
 
 
 async def handle_message_update(session: AsyncSession, event: WebhookEvent) -> None:

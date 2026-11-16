@@ -15,7 +15,8 @@ El diseño completo está en el documento de la Fase 1.
 | 3.4 | Recibir los avisos de Evolution y guardarlos en `webhook_events` | Lista (PR #5) |
 | 3.5 | Cola ingest (ARQ): el worker procesa cada aviso, con reintentos | Lista (PR #6) |
 | 3.6 | Cada aviso de mensaje se convierte en contacto, conversación y mensaje | Lista (PR #7) |
-| 3.7 | Estado de conexión del número y prueba de punta a punta | Esta rama |
+| 3.7 | Estado de conexión del número y prueba de punta a punta | Lista (PR #8) |
+| 4.1 | Enviar mensajes: cola de salida, reintentos y confirmación | Esta rama |
 
 ## Estructura
 
@@ -40,10 +41,12 @@ El diseño completo está en el documento de la Fase 1.
     │   ├── services/webhook_processing.py  Procesar avisos: manejadores y reintentos
     │   ├── services/message_ingest.py  Aviso de mensaje -> contacto, conversación, mensaje
     │   ├── services/connection_events.py  Aviso de conexión -> estado del número
+    │   ├── services/outbound.py  Cola de salida: guardar y enviar mensajes por Evolution
     │   ├── workers/ingest.py   Worker ARQ de la cola ingest (+ barrido cada minuto)
     │   ├── integrations/evolution/  Cliente de Evolution API (instancias, QR, estado)
     │   ├── scripts/evolution_qr.py  Prueba manual: conectar un WhatsApp con QR
     │   ├── scripts/registrar_numero.py  Registrar el número de un negocio en Saint
+    │   ├── scripts/enviar_mensaje.py  Prueba manual: enviar un WhatsApp desde Saint
     │   ├── db/base.py          Clase Base, convención de nombres y piezas comunes
     │   ├── db/ids.py           Generador de UUID v7
     │   ├── db/session.py       Conexión y sesiones con el negocio activo (RLS)
@@ -139,6 +142,24 @@ En otra terminal, junto a la API:
 
 ```bash
 uv run arq app.workers.ingest.WorkerSettings
+```
+
+## Enviar mensajes (cola de salida)
+
+La tabla `messages` también es la cola de salida. Un mensaje saliente se guarda con estado
+`queued`, el worker lo toma (`sending`), se lo pasa a Evolution y lo marca `sent` con el id
+de WhatsApp; después los avisos `messages.update` lo pasan a `delivered` y `read`.
+
+- Número sin WhatsApp (Evolution responde 4xx): `failed`, sin reintentar.
+- Evolution caído o error 5xx, o el número desconectado: se reintenta (hasta 5 veces).
+- Evolution no responde a tiempo: se queda en `sending` y **no** se reintenta, para no
+  mandarlo dos veces. El aviso `send.message` de Evolution confirma que sí salió.
+- Si Redis estaba caído al encolar, el barrido de cada minuto lo encuentra.
+
+Prueba manual, con la API, Evolution y el worker en marcha:
+
+```bash
+uv run python -m app.scripts.enviar_mensaje panaderia-prueba "+58 412 1234567" "Hola"
 ```
 
 ## Dos usuarios de base de datos
