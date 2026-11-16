@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from app.api import auth, conversations, health, numbers, tenant, webhooks
+from app.api import agent, auth, conversations, health, numbers, tenant, webhooks
 from app.core.config import Settings, get_settings
 from app.core.queue import create_queue_pool
 from app.core.redis import create_redis
@@ -53,7 +53,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             CORSMiddleware,
             allow_origins=origins,
             allow_credentials=True,
-            allow_methods=["GET", "POST", "PATCH", "DELETE"],
+            allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
             allow_headers=["Authorization", "Content-Type"],
         )
     app.include_router(health.router)
@@ -62,6 +62,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(tenant.router)
     app.include_router(numbers.router)
     app.include_router(conversations.router)
+    app.include_router(agent.router)
     return app
 
 

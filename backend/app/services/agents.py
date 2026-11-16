@@ -57,19 +57,21 @@ async def get_agent(session: AsyncSession, conversation: Conversation) -> Agent:
         agent = await session.get(Agent, conversation.active_agent_id)
         if agent is not None and agent.is_active:
             return agent
-    agent = await session.scalar(
-        select(Agent).where(
-            Agent.tenant_id == conversation.tenant_id, Agent.key == DEFAULT_AGENT_KEY
-        )
-    )
+    return await ensure_default_agent(session, conversation.tenant_id)
+
+
+async def ensure_default_agent(session: AsyncSession, tenant_id: uuid.UUID) -> Agent:
+    """El agente básico del negocio. Si todavía no existe, se crea con DEFAULT_PROMPT."""
+    query = select(Agent).where(Agent.tenant_id == tenant_id, Agent.key == DEFAULT_AGENT_KEY)
+    agent = await session.scalar(query)
     if agent is None:
         # ON CONFLICT DO NOTHING: si otra conversación del mismo negocio lo crea a la vez,
         # no falla; luego se lee el que quedó.
-        tenant = await session.get(Tenant, conversation.tenant_id)
+        tenant = await session.get(Tenant, tenant_id)
         await session.execute(
             insert(Agent)
             .values(
-                tenant_id=conversation.tenant_id,
+                tenant_id=tenant_id,
                 key=DEFAULT_AGENT_KEY,
                 name="Atención al cliente",
                 kind=AgentKind.SPECIALIST,
@@ -78,11 +80,7 @@ async def get_agent(session: AsyncSession, conversation: Conversation) -> Agent:
             )
             .on_conflict_do_nothing(index_elements=["tenant_id", "key"])
         )
-        agent = await session.scalar(
-            select(Agent).where(
-                Agent.tenant_id == conversation.tenant_id, Agent.key == DEFAULT_AGENT_KEY
-            )
-        )
+        agent = await session.scalar(query)
     return agent
 
 
