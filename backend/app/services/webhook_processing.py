@@ -1,9 +1,9 @@
 """Procesar los avisos guardados en webhook_events (lo hace el worker de la cola ingest).
 
-Cada tipo de aviso tiene su "manejador" (handler). Este bloque (3.5) monta la maquinaria:
-tomar el aviso sin que otro worker lo tome a la vez, llamar al manejador, marcar el
-resultado y reintentar si falla. Los manejadores de mensajes llegan en el 3.6 y el de
-conexión en el 3.7; mientras tanto esos avisos se quedan en 'pending' esperando.
+Cada tipo de aviso tiene su "manejador" (handler). Aquí está la maquinaria: tomar el
+aviso sin que otro worker lo tome a la vez, llamar al manejador, marcar el resultado y
+reintentar si falla. Los manejadores de mensajes están en message_ingest (3.6); el de
+conexión llega en el 3.7 y, mientras tanto, esos avisos se quedan en 'pending'.
 """
 
 import logging
@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.db.session import SessionFactory, tenant_session
 from app.models import WebhookEvent
 from app.models.enums import WebhookEventStatus
+from app.services import message_ingest
 
 logger = logging.getLogger(__name__)
 
@@ -33,9 +34,12 @@ async def _nothing_to_do(session: AsyncSession, event: WebhookEvent) -> None:
     """El QR ya lo muestra el script de registro; aquí no hay nada más que hacer."""
 
 
-# Tipo de aviso -> función que lo procesa. El 3.6 y el 3.7 añaden los suyos aquí.
+# Tipo de aviso -> función que lo procesa. El 3.7 añade connection.update.
 HANDLERS: dict[str, Handler] = {
     "qrcode.updated": _nothing_to_do,
+    "messages.upsert": message_ingest.handle_message_upsert,
+    "send.message": message_ingest.handle_send_message,
+    "messages.update": message_ingest.handle_message_update,
 }
 
 

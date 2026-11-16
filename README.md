@@ -13,8 +13,9 @@ El diseño completo está en el documento de la Fase 1.
 | 3.2 | Evolution API en Docker y cliente en Python | Lista (PR #3) |
 | 3.3 | Registrar un número en Saint (cifrado, webhook) | Lista (PR #4) |
 | 3.4 | Recibir los avisos de Evolution y guardarlos en `webhook_events` | Lista (PR #5) |
-| 3.5 | Cola ingest (ARQ): el worker procesa cada aviso, con reintentos | Esta rama |
-| 3.6–3.7 | Guardado de mensajes, estado de conexión | Pendiente |
+| 3.5 | Cola ingest (ARQ): el worker procesa cada aviso, con reintentos | Lista (PR #6) |
+| 3.6 | Cada aviso de mensaje se convierte en contacto, conversación y mensaje | Esta rama |
+| 3.7 | Estado de conexión y prueba completa | Pendiente |
 
 ## Estructura
 
@@ -37,6 +38,7 @@ El diseño completo está en el documento de la Fase 1.
     │   ├── services/channel_registration.py  Registrar un número y su estado
     │   ├── services/webhook_ingest.py  Validar el secreto y guardar cada aviso
     │   ├── services/webhook_processing.py  Procesar avisos: manejadores y reintentos
+    │   ├── services/message_ingest.py  Aviso de mensaje -> contacto, conversación, mensaje
     │   ├── workers/ingest.py   Worker ARQ de la cola ingest (+ barrido cada minuto)
     │   ├── integrations/evolution/  Cliente de Evolution API (instancias, QR, estado)
     │   ├── scripts/evolution_qr.py  Prueba manual: conectar un WhatsApp con QR
@@ -128,8 +130,9 @@ Escribe al número conectado desde otro teléfono y mira la tabla `webhook_event
 Cada aviso guardado se encola en Redis (cola `saint:ingest`). El worker lo toma, llama al
 manejador de su tipo y lo marca `processed`; si falla, lo reintenta (10 s, 20 s, 40 s...)
 y tras 5 intentos lo deja en `failed` con el error. Cada minuto hace un barrido por si
-algún aviso no se pudo encolar (por ejemplo, Redis estaba caído). Los avisos de mensajes
-y de conexión siguen en `pending` hasta que existan sus manejadores (3.6 y 3.7).
+algún aviso no se pudo encolar (por ejemplo, Redis estaba caído). Los mensajes se guardan
+en `contacts`, `conversations` y `messages` (3.6); los avisos de conexión siguen en
+`pending` hasta el 3.7.
 
 En otra terminal, junto a la API:
 
