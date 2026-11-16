@@ -9,7 +9,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-from app.api.webhooks import get_session_factory
+from app.api.webhooks import get_queue, get_session_factory
 from app.core.security import hash_secret, new_secret
 from app.db.session import tenant_session
 from app.main import create_app
@@ -41,11 +41,31 @@ def factory(app_engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
     return async_sessionmaker(app_engine, expire_on_commit=False)
 
 
+class FakeQueue:
+    """Hace de cola ARQ: recuerda lo que se encoló."""
+
+    def __init__(self, broken: bool = False) -> None:
+        self.jobs: list[tuple[str, tuple, dict]] = []
+        self.broken = broken
+
+    async def enqueue_job(self, name: str, *args, **kwargs):
+        if self.broken:
+            raise ConnectionError("Redis caído")
+        self.jobs.append((name, args, kwargs))
+        return object()
+
+
 @pytest.fixture
-async def client(factory) -> AsyncIterator[httpx.AsyncClient]:
+def queue() -> FakeQueue:
+    return FakeQueue()
+
+
+@pytest.fixture
+async def client(factory, queue) -> AsyncIterator[httpx.AsyncClient]:
     """La API real, pero usando la conexión con permisos de saint_app (RLS activo)."""
     app = create_app()
     app.dependency_overrides[get_session_factory] = lambda: factory
+    app.dependency_overrides[get_queue] = lambda: queue
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
@@ -108,6 +128,32 @@ async def test_guarda_el_aviso(owner_engine: AsyncEngine, client, factory) -> No
     assert instance.last_event_at is not None
 
 
+async def test_encola_el_aviso(owner_engine: AsyncEngine, client, queue) -> None:
+    number = await new_number(owner_engine)
+    await client.post(number.url, json=message("E1"), headers=number.headers)
+    # El reintento de Evolution no se vuelve a encolar.
+    await client.post(number.url, json=message("E1"), headers=number.headers)
+    [(name, args, kwargs)] = queue.jobs
+    assert name == "process_webhook_event"
+    assert args[1] == str(number.tenant_id)
+    assert kwargs["_job_id"] == f"webhook-event:{args[0]}"
+    assert kwargs["_queue_name"] == "saint:ingest"
+
+
+async def test_redis_caido_no_pierde_el_aviso(owner_engine: AsyncEngine, factory) -> None:
+    number = await new_number(owner_engine)
+    app = create_app()
+    app.dependency_overrides[get_session_factory] = lambda: factory
+    app.dependency_overrides[get_queue] = lambda: FakeQueue(broken=True)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        response = await c.post(number.url, json=message(), headers=number.headers)
+    # Se responde 200 y el aviso queda guardado; el barrido del worker lo encolará.
+    assert response.status_code == 200
+    [event] = await events_of(number, factory)
+    assert event.status == WebhookEventStatus.PENDING
+
+
 async def test_reintento_no_duplica(owner_engine: AsyncEngine, client, factory) -> None:
     number = await new_number(owner_engine)
     first = await client.post(number.url, json=message("X1"), headers=number.headers)
@@ -152,13 +198,16 @@ async def test_cuerpo_invalido(owner_engine: AsyncEngine, client) -> None:
     assert (await client.post(number.url, content=big, headers=h)).status_code == 413
 
 
-async def test_evento_no_pedido_queda_ignorado(owner_engine: AsyncEngine, client, factory) -> None:
+async def test_evento_no_pedido_queda_ignorado(
+    owner_engine: AsyncEngine, client, factory, queue
+) -> None:
     number = await new_number(owner_engine)
     payload = {"event": "chats.update", "instance": "saint-abc", "data": []}
     response = await client.post(number.url, json=payload, headers=number.headers)
     assert response.status_code == 200
     [event] = await events_of(number, factory)
     assert event.status == WebhookEventStatus.IGNORED
+    assert queue.jobs == []  # lo ignorado no se encola
 
 
 def test_external_id_por_tipo() -> None:

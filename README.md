@@ -12,8 +12,9 @@ El diseño completo está en el documento de la Fase 1.
 | 3.1 | App FastAPI mínima con `/health` | Lista (PR #2) |
 | 3.2 | Evolution API en Docker y cliente en Python | Lista (PR #3) |
 | 3.3 | Registrar un número en Saint (cifrado, webhook) | Lista (PR #4) |
-| 3.4 | Recibir los avisos de Evolution y guardarlos en `webhook_events` | Esta rama |
-| 3.5–3.7 | Cola ingest, guardado de mensajes, estado de conexión | Pendiente |
+| 3.4 | Recibir los avisos de Evolution y guardarlos en `webhook_events` | Lista (PR #5) |
+| 3.5 | Cola ingest (ARQ): el worker procesa cada aviso, con reintentos | Esta rama |
+| 3.6–3.7 | Guardado de mensajes, estado de conexión | Pendiente |
 
 ## Estructura
 
@@ -31,9 +32,12 @@ El diseño completo está en el documento de la Fase 1.
     │   ├── api/webhooks.py     POST /webhooks/evolution/{public_id}: avisos de Evolution
     │   ├── core/config.py      Lee la configuración del .env
     │   ├── core/redis.py       Conexión a Redis
+    │   ├── core/queue.py       Cola ingest (ARQ): nombre y cómo encolar
     │   ├── core/security.py    Cifrado (Fernet) y huellas de secretos
     │   ├── services/channel_registration.py  Registrar un número y su estado
     │   ├── services/webhook_ingest.py  Validar el secreto y guardar cada aviso
+    │   ├── services/webhook_processing.py  Procesar avisos: manejadores y reintentos
+    │   ├── workers/ingest.py   Worker ARQ de la cola ingest (+ barrido cada minuto)
     │   ├── integrations/evolution/  Cliente de Evolution API (instancias, QR, estado)
     │   ├── scripts/evolution_qr.py  Prueba manual: conectar un WhatsApp con QR
     │   ├── scripts/registrar_numero.py  Registrar el número de un negocio en Saint
@@ -118,6 +122,20 @@ uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
 Escribe al número conectado desde otro teléfono y mira la tabla `webhook_events`.
+
+## Worker de la cola ingest
+
+Cada aviso guardado se encola en Redis (cola `saint:ingest`). El worker lo toma, llama al
+manejador de su tipo y lo marca `processed`; si falla, lo reintenta (10 s, 20 s, 40 s...)
+y tras 5 intentos lo deja en `failed` con el error. Cada minuto hace un barrido por si
+algún aviso no se pudo encolar (por ejemplo, Redis estaba caído). Los avisos de mensajes
+y de conexión siguen en `pending` hasta que existan sus manejadores (3.6 y 3.7).
+
+En otra terminal, junto a la API:
+
+```bash
+uv run arq app.workers.ingest.WorkerSettings
+```
 
 ## Dos usuarios de base de datos
 

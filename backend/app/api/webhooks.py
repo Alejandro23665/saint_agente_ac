@@ -4,10 +4,13 @@ import json
 import logging
 from typing import Annotated
 
+from arq.connections import ArqRedis
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.core.queue import enqueue_webhook_event
+from app.models.enums import WebhookEventStatus
 from app.services.channel_registration import WEBHOOK_SECRET_HEADER
 from app.services.webhook_ingest import (
     InvalidSecretError,
@@ -28,6 +31,11 @@ def get_session_factory(request: Request) -> async_sessionmaker[AsyncSession]:
     return request.app.state.session_factory
 
 
+def get_queue(request: Request) -> ArqRedis:
+    """Conexión a la cola ingest (ARQ) creada al arrancar."""
+    return request.app.state.queue
+
+
 def error(status_code: int, detail: str) -> JSONResponse:
     return JSONResponse(status_code=status_code, content={"detail": detail})
 
@@ -37,6 +45,7 @@ async def evolution_webhook(
     public_id: str,
     request: Request,
     factory: Annotated[async_sessionmaker[AsyncSession], Depends(get_session_factory)],
+    queue: Annotated[ArqRedis, Depends(get_queue)],
 ) -> JSONResponse:
     body = await request.body()
     if len(body) > MAX_BODY_BYTES:
@@ -58,6 +67,14 @@ async def evolution_webhook(
     except InvalidSecretError:
         logger.warning("Webhook con secreto inválido para public_id=%s", public_id)
         return error(401, "Secreto inválido")
+
+    if stored.event_id is not None and stored.status == WebhookEventStatus.PENDING:
+        try:
+            await enqueue_webhook_event(queue, stored.event_id, stored.tenant_id)
+        except Exception:  # noqa: BLE001
+            # El aviso ya está guardado: si Redis falla, el barrido del worker lo
+            # encolará más tarde. A Evolution le respondemos 200 igualmente.
+            logger.exception("No se pudo encolar el aviso %s", stored.event_id)
 
     return JSONResponse(
         {"status": "duplicate" if stored.duplicate else "stored", "event": stored.event_type}
