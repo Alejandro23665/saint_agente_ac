@@ -19,13 +19,15 @@ El diseño completo está en el documento de la Fase 1.
 | 4.1 | Enviar mensajes: cola de salida, reintentos y confirmación | Lista (PR #9) |
 | 4.2 | El bot espera 15 s a que el cliente termine y contesta (eco, sin IA) | Lista (PR #10) |
 | 4.3 | Respuesta con IA (Claude Haiku 5.5), agente del negocio y registro en `llm_runs` | Lista (PR #11) |
-| 4.4 a 4.8 | Conocimiento, RAG, pasar a humano, notas de voz y prueba final | Pendientes (falta la clave de OpenRouter) |
 | 5.1 | Inicio de sesión del panel: contraseñas argon2, pase JWT de 15 min y sesión de 7 días | Lista (PR #13) |
 | 5.2 | Negocio, miembros y roles; invitar con enlace de un solo uso | Lista (PR #14) |
 | 5.3 | Números de WhatsApp desde el panel: conectar con QR, estado, grupos, desconectar | Lista (PR #15) |
 | 5.4 | Bandeja de conversaciones: leer, contestar como persona, tomar y devolver al bot | Lista (PR #16) |
 | 5.5 | Instrucciones del agente con historial de versiones, y horario de atención | Lista (PR #17) |
-| 5.6 | Bandeja en tiempo real: avisos al panel por `/events` (Redis + SSE) | Esta rama |
+| 5.6 | Bandeja en tiempo real: avisos al panel por `/events` (Redis + SSE) | Lista (PR #18) |
+| 4.4 | Conocimiento del negocio: fragmentos con embeddings (OpenRouter Nemotron) | Código listo (PR #12); la prueba real espera la clave de OpenRouter |
+| 4.5 a 4.8 | RAG, pasar a humano, notas de voz y prueba final | Pendientes (falta la clave de OpenRouter) |
+| 5.7 | Conocimiento desde el panel: subir textos, ver su estado, reintentar y borrar | Esta rama |
 
 ## Estructura
 
@@ -47,6 +49,7 @@ El diseño completo está en el documento de la Fase 1.
     │   ├── api/conversations.py  /conversations/...: bandeja, mensajes, contestar, tomar, devolver
     │   ├── api/agent.py        /agent y /hours: instrucciones del bot, versiones y horario
     │   ├── api/events.py       GET /events: avisos en tiempo real para el panel
+    │   ├── api/knowledge.py    /knowledge/...: subir textos del negocio, ver estado, reintentar, borrar
     │   ├── core/config.py      Lee la configuración del .env
     │   ├── core/redis.py       Conexión a Redis
     │   ├── core/events.py      Publicar avisos al panel en el canal Redis del negocio
@@ -68,13 +71,17 @@ El diseño completo está en el documento de la Fase 1.
     │   ├── services/inbox.py   Bandeja: listar, leer, contestar, tomar, devolver, asignar, cerrar
     │   ├── services/agent_settings.py  Instrucciones del agente (con versiones) y horario
     │   ├── services/hours.py   Validar el horario y saber si el negocio está abierto
+    │   ├── services/knowledge.py  Conocimiento del negocio: fragmentos y embeddings
+    │   ├── services/knowledge_panel.py  El conocimiento desde el panel y quién puede tocarlo
     │   ├── integrations/llm.py  Cliente de Claude (Anthropic)
+    │   ├── integrations/embeddings.py  Cliente de embeddings (OpenRouter)
     │   ├── workers/ingest.py   Worker ARQ de la cola ingest (+ barrido cada minuto)
     │   ├── integrations/evolution/  Cliente de Evolution API (instancias, QR, estado)
     │   ├── scripts/evolution_qr.py  Prueba manual: conectar un WhatsApp con QR
     │   ├── scripts/registrar_numero.py  Registrar el número de un negocio en Saint
     │   ├── scripts/enviar_mensaje.py  Prueba manual: enviar un WhatsApp desde Saint
     │   ├── scripts/crear_usuario.py  Crear un usuario del panel y darle acceso a un negocio
+    │   ├── scripts/cargar_conocimiento.py  Cargar, listar y borrar el conocimiento
     │   ├── db/base.py          Clase Base, convención de nombres y piezas comunes
     │   ├── db/ids.py           Generador de UUID v7
     │   ├── db/session.py       Conexión y sesiones con el negocio activo (RLS)
@@ -82,6 +89,7 @@ El diseño completo está en el documento de la Fase 1.
     ├── migrations/
     │   ├── env.py              Cómo se conecta Alembic
     │   └── versions/0001_...   Esquema inicial: tablas, índices, ENUM y RLS
+    ├── ejemplos/               Texto de ejemplo para cargar como conocimiento
     └── tests/                  Pruebas de migración, restricciones y RLS
 ```
 
@@ -341,6 +349,41 @@ data: {"type": "conversation.changed", "conversation_id": "..."}
 - Detrás de Caddy o nginx, la respuesta lleva `X-Accel-Buffering: no` para que no se guarde.
 
 Probarlo a mano: `curl -N -H "Authorization: Bearer <pase>" http://localhost:8000/events`
+## Conocimiento del negocio
+
+Lo que el bot sabrá del negocio (horarios, productos, precios...) se carga desde un
+archivo de texto (.txt o .md). Se parte en fragmentos de unos 500 tokens y a cada uno se
+le calcula su embedding con OpenRouter (modelo `nvidia/nemotron-3.5-embed-8b:free`,
+recortado a 1024 números). Hace falta `OPENROUTER_API_KEY` en el `.env`.
+
+```bash
+cd backend
+uv run python -m app.scripts.cargar_conocimiento cargar panaderia-prueba ejemplos/panaderia_prueba.md
+uv run python -m app.scripts.cargar_conocimiento listar panaderia-prueba
+uv run python -m app.scripts.cargar_conocimiento borrar panaderia-prueba panaderia_prueba
+```
+
+- El título es el nombre del archivo (o `--titulo`). Cargar otro texto con el mismo
+  título reemplaza al anterior; cargar el mismo texto otra vez no hace nada.
+- El modelo gratuito guarda lo que se le manda: carga solo información pública.
+- Todavía el bot no usa este conocimiento al responder: eso llega en el bloque 4.5.
+
+### Desde el panel
+
+| Ruta | Qué hace | Quién puede |
+| --- | --- | --- |
+| `GET /knowledge` | Los documentos y su estado | Todos |
+| `GET /knowledge/{id}` | Un documento con sus fragmentos | Todos |
+| `POST /knowledge` | Subir un texto (`{"title": ..., "text": ...}`, hasta 200 000 caracteres) | Dueño y administrador |
+| `POST /knowledge/{id}/retry` | Reintentar uno que falló | Dueño y administrador |
+| `DELETE /knowledge/{id}` | Borrarlo con sus fragmentos | Dueño y administrador |
+
+- Subir responde enseguida (202) con el documento en `processing`. El worker pide los
+  embeddings y lo deja `ready` o `failed`; al panel le llega `knowledge.changed` por
+  `/events`.
+- Sin `OPENROUTER_API_KEY`, queda `failed` con ese aviso. El texto queda guardado: al
+  poner la clave y reiniciar el worker, basta con reintentar.
+- Un texto nuevo con el mismo título reemplaza al viejo solo cuando el nuevo queda listo.
 
 ## Dos usuarios de base de datos
 
