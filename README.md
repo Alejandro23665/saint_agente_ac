@@ -10,8 +10,9 @@ El diseño completo está en el documento de la Fase 1.
 | 1 | Diseño (arquitectura, esquema, riesgos) | Lista |
 | 2 | Modelos SQLAlchemy, migración Alembic, RLS y pruebas | Lista (PR #1) |
 | 3.1 | App FastAPI mínima con `/health` | Lista (PR #2) |
-| 3.2 | Evolution API en Docker y cliente en Python | Esta rama |
-| 3.3–3.7 | Registrar número, webhook, cola ingest, guardado de mensajes | Pendiente |
+| 3.2 | Evolution API en Docker y cliente en Python | Lista (PR #3) |
+| 3.3 | Registrar un número en Saint (cifrado, webhook) | Esta rama |
+| 3.4–3.7 | Webhook, cola ingest, guardado de mensajes | Pendiente |
 
 ## Estructura
 
@@ -28,8 +29,11 @@ El diseño completo está en el documento de la Fase 1.
     │   ├── api/health.py       GET /health: estado de PostgreSQL y Redis
     │   ├── core/config.py      Lee la configuración del .env
     │   ├── core/redis.py       Conexión a Redis
+    │   ├── core/security.py    Cifrado (Fernet) y huellas de secretos
+    │   ├── services/channel_registration.py  Registrar un número y su estado
     │   ├── integrations/evolution/  Cliente de Evolution API (instancias, QR, estado)
     │   ├── scripts/evolution_qr.py  Prueba manual: conectar un WhatsApp con QR
+    │   ├── scripts/registrar_numero.py  Registrar el número de un negocio en Saint
     │   ├── db/base.py          Clase Base, convención de nombres y piezas comunes
     │   ├── db/ids.py           Generador de UUID v7
     │   ├── db/session.py       Conexión y sesiones con el negocio activo (RLS)
@@ -84,6 +88,16 @@ Para desvincularlo y borrarlo: `uv run python -m app.scripts.evolution_qr prueba
 Si ya habías levantado PostgreSQL antes de este bloque, la base `evolution` no existe
 todavía (los scripts de `docker/postgres` solo corren con un volumen nuevo). En desarrollo,
 lo más simple es `docker compose down -v` (borra los datos locales) y volver a levantar.
+
+## Registrar el número de un negocio
+
+```bash
+uv run python -m app.scripts.registrar_numero "Panadería Prueba"
+```
+
+Crea el negocio si no existe, crea el número en Evolution con su webhook apuntando a
+Saint, lo guarda en `channel_instances` (token cifrado y solo la huella del secreto del
+webhook) y espera a que escanees el QR. Necesita `FERNET_KEY` en el `.env`.
 
 ## Dos usuarios de base de datos
 

@@ -42,6 +42,10 @@ services:
     # se prueba en desarrollo, porque Evolution cambia la forma de sus respuestas.
     image: evoapicloud/evolution-api:v2.3.7
     restart: unless-stopped
+    # Permite que Evolution llame a la API de Saint en tu computadora con
+    # host.docker.internal (en Windows y Mac ya existe; esto lo agrega en Linux).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy

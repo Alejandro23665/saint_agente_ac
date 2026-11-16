@@ -162,3 +162,42 @@ async def test_evolution_apagado() -> None:
 def test_sin_clave_no_arranca() -> None:
     with pytest.raises(ValueError, match="EVOLUTION_API_KEY"):
         EvolutionClient("http://evolution:8080", "")
+
+
+async def test_cambiar_webhook() -> None:
+    from app.integrations.evolution import WebhookConfig
+
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["path"] = request.url.path
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(201, json={"webhook": {"enabled": True}})
+
+    async with client_with(handler) as evo:
+        await evo.set_webhook("a", WebhookConfig(url="http://x/w", headers={"X-S": "s"}))
+    assert seen["path"] == "/webhook/set/a"
+    assert seen["body"]["webhook"]["url"] == "http://x/w"
+    assert seen["body"]["webhook"]["headers"] == {"X-S": "s"}
+    assert seen["body"]["webhook"]["enabled"] is True
+
+
+async def test_datos_de_la_instancia_y_su_telefono() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.params["instanceName"] == "a"
+        return httpx.Response(
+            200,
+            json=[
+                {
+                    "name": "a",
+                    "connectionStatus": "open",
+                    "ownerJid": "584121234567:12@s.whatsapp.net",
+                    "profileName": "Panadería",
+                }
+            ],
+        )
+
+    async with client_with(handler) as evo:
+        info = await evo.fetch_instance("a")
+    assert info.phone_number == "+584121234567"
+    assert info.profile_name == "Panadería"
