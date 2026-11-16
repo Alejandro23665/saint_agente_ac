@@ -7,9 +7,10 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from app.api import health, webhooks
+from app.api import auth, health, webhooks
 from app.core.config import Settings, get_settings
 from app.core.queue import create_queue_pool
 from app.core.redis import create_redis
@@ -44,8 +45,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         redoc_url=None,
         openapi_url="/openapi.json" if is_dev else None,
     )
+    # El panel web vive en otra dirección (otro puerto u otro dominio): el navegador solo
+    # le deja llamar a la API, con su cookie de sesión, si la API lo autoriza aquí.
+    origins = [o.strip() for o in settings.panel_origins.split(",") if o.strip()]
+    if origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=origins,
+            allow_credentials=True,
+            allow_methods=["GET", "POST", "PATCH", "DELETE"],
+            allow_headers=["Authorization", "Content-Type"],
+        )
     app.include_router(health.router)
     app.include_router(webhooks.router)
+    app.include_router(auth.router)
     return app
 
 

@@ -40,6 +40,12 @@ class Settings(BaseSettings):
     # Clave de Anthropic (modelo de IA del bot). Sin clave, el bot contesta con un eco.
     anthropic_api_key: SecretStr = SecretStr("")
 
+    # Inicio de sesión del panel (bloque 5.1). JWT_SECRET firma los pases de 15 minutos:
+    # quien la tenga puede fabricar pases, así que va solo en el .env (32+ caracteres).
+    jwt_secret: SecretStr = SecretStr("")
+    # Direcciones desde las que el panel web llama a la API (separadas por coma).
+    panel_origins: str = "http://127.0.0.1:5173,http://localhost:5173"
+
 
 @lru_cache
 def get_settings() -> Settings:
