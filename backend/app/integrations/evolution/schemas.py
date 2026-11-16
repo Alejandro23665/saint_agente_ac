@@ -67,3 +67,19 @@ class InstanceInfo(_Base):
             return None
         digits = self.owner_jid.split("@", 1)[0].split(":", 1)[0]
         return f"+{digits}" if digits.isdigit() else None
+
+
+class _MessageKey(_Base):
+    id: str
+    remote_jid: str | None = Field(default=None, alias="remoteJid")
+
+
+class SentMessage(_Base):
+    """Respuesta de /message/sendText: el id que WhatsApp le dio al mensaje."""
+
+    key: _MessageKey
+    status: str | None = None
+
+    @property
+    def message_id(self) -> str:
+        return self.key.id

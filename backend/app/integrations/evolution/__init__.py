@@ -5,17 +5,20 @@ from app.integrations.evolution.client import (
     CreatedInstance,
     EvolutionClient,
     EvolutionError,
+    EvolutionTimeout,
     QrCode,
     WebhookConfig,
 )
-from app.integrations.evolution.schemas import InstanceInfo
+from app.integrations.evolution.schemas import InstanceInfo, SentMessage
 
 __all__ = [
     "ConnectionState",
     "CreatedInstance",
     "EvolutionClient",
     "EvolutionError",
+    "EvolutionTimeout",
     "InstanceInfo",
     "QrCode",
+    "SentMessage",
     "WebhookConfig",
 ]

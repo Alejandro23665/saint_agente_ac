@@ -241,7 +241,9 @@ async def store_message(
 
     outbound = parsed.from_me or sent_by_api
     if sent_by_api:
-        sender = SenderType.BOT
+        # Enviado por la API de Evolution pero no desde Saint (por ejemplo, desde el
+        # panel de Evolution): lo de Saint ya tiene su fila y se une en handle_send_message.
+        sender = SenderType.SYSTEM
     elif parsed.from_me:
         sender = SenderType.HUMAN_PHONE  # el dueño respondió desde su teléfono
     else:
@@ -296,6 +298,43 @@ async def handle_message_upsert(session: AsyncSession, event: WebhookEvent) -> N
 
 
 async def handle_send_message(session: AsyncSession, event: WebhookEvent) -> None:
+    """Confirmación de un envío por la API de Evolution.
+
+    Casi siempre es un mensaje que mandó Saint (outbound.send_queued_message). Este aviso
+    puede llegar ANTES de que el worker guarde el id de WhatsApp, así que se busca
+    nuestro mensaje en 'sending' para el mismo contacto y con el mismo texto, y se une.
+    """
+    parsed = parse_message(event.payload.get("data"))
+    if parsed is None:
+        return
+    already = await session.scalar(
+        select(Message.id).where(
+            Message.channel_instance_id == event.channel_instance_id,
+            Message.external_id == parsed.external_id,
+        )
+    )
+    if already is not None:
+        return
+    ours = await session.scalar(
+        select(Message)
+        .join(Conversation, Conversation.id == Message.conversation_id)
+        .join(Contact, Contact.id == Conversation.contact_id)
+        .where(
+            Message.channel_instance_id == event.channel_instance_id,
+            Message.direction == MessageDirection.OUTBOUND,
+            Message.status == MessageStatus.SENDING,
+            Message.external_id.is_(None),
+            Message.text == parsed.text,
+            Contact.external_id == parsed.remote_jid,
+        )
+        .order_by(Message.created_at)
+        .limit(1)
+        .with_for_update(of=Message)
+    )
+    if ours is not None:
+        ours.external_id = parsed.external_id
+        ours.status = MessageStatus.SENT
+        return
     await store_message(session, event, sent_by_api=True)
 
 

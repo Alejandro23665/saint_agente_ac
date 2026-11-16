@@ -5,9 +5,11 @@ import uuid
 from arq.connections import ArqRedis, RedisSettings
 from redis.asyncio import ConnectionPool
 
-# Cola de entrada: un trabajo por cada aviso de Evolution guardado en webhook_events.
+# Cola de trabajo del worker: un trabajo por cada aviso de Evolution guardado en
+# webhook_events y por cada mensaje saliente que hay que enviar.
 INGEST_QUEUE = "saint:ingest"
 PROCESS_WEBHOOK_EVENT = "process_webhook_event"
+SEND_OUTBOUND_MESSAGE = "send_outbound_message"
 
 
 def redis_settings(url: str) -> RedisSettings:
@@ -35,6 +37,22 @@ async def enqueue_webhook_event(pool: ArqRedis, event_id: uuid.UUID, tenant_id: 
         str(tenant_id),
         _job_id=webhook_job_id(event_id),
         # La cola de la conexión: saint:ingest (las pruebas usan otra para no mezclarse).
+        _queue_name=pool.default_queue_name,
+    )
+    return job is not None
+
+
+def outbound_job_id(message_id: uuid.UUID) -> str:
+    return f"outbound-message:{message_id}"
+
+
+async def enqueue_outbound(pool: ArqRedis, message_id: uuid.UUID, tenant_id: uuid.UUID) -> bool:
+    """Encola el envío de un mensaje saliente. Devuelve False si ya estaba en la cola."""
+    job = await pool.enqueue_job(
+        SEND_OUTBOUND_MESSAGE,
+        str(message_id),
+        str(tenant_id),
+        _job_id=outbound_job_id(message_id),
         _queue_name=pool.default_queue_name,
     )
     return job is not None
