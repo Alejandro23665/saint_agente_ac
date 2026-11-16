@@ -18,7 +18,8 @@ El diseño completo está en el documento de la Fase 1.
 | 3.7 | Estado de conexión del número y prueba de punta a punta | Lista (PR #8) |
 | 4.1 | Enviar mensajes: cola de salida, reintentos y confirmación | Lista (PR #9) |
 | 4.2 | El bot espera 15 s a que el cliente termine y contesta (eco, sin IA) | Lista (PR #10) |
-| 4.3 | Respuesta con IA (Claude Haiku 5.5), agente del negocio y registro en `llm_runs` | Esta rama |
+| 4.3 | Respuesta con IA (Claude Haiku 5.5), agente del negocio y registro en `llm_runs` | Lista (PR #11) |
+| 4.4 | Conocimiento del negocio: fragmentos con embeddings (OpenRouter Nemotron) | Esta rama |
 
 ## Estructura
 
@@ -46,12 +47,15 @@ El diseño completo está en el documento de la Fase 1.
     │   ├── services/outbound.py  Cola de salida: guardar y enviar mensajes por Evolution
     │   ├── services/bot_reply.py  Esperar 15 s y contestar al cliente
     │   ├── services/agents.py  Agente del negocio e historial que se le manda a la IA
+    │   ├── services/knowledge.py  Conocimiento del negocio: fragmentos y embeddings
     │   ├── integrations/llm.py  Cliente de Claude (Anthropic)
+    │   ├── integrations/embeddings.py  Cliente de embeddings (OpenRouter)
     │   ├── workers/ingest.py   Worker ARQ de la cola ingest (+ barrido cada minuto)
     │   ├── integrations/evolution/  Cliente de Evolution API (instancias, QR, estado)
     │   ├── scripts/evolution_qr.py  Prueba manual: conectar un WhatsApp con QR
     │   ├── scripts/registrar_numero.py  Registrar el número de un negocio en Saint
     │   ├── scripts/enviar_mensaje.py  Prueba manual: enviar un WhatsApp desde Saint
+    │   ├── scripts/cargar_conocimiento.py  Cargar, listar y borrar el conocimiento
     │   ├── db/base.py          Clase Base, convención de nombres y piezas comunes
     │   ├── db/ids.py           Generador de UUID v7
     │   ├── db/session.py       Conexión y sesiones con el negocio activo (RLS)
@@ -59,6 +63,7 @@ El diseño completo está en el documento de la Fase 1.
     ├── migrations/
     │   ├── env.py              Cómo se conecta Alembic
     │   └── versions/0001_...   Esquema inicial: tablas, índices, ENUM y RLS
+    ├── ejemplos/               Texto de ejemplo para cargar como conocimiento
     └── tests/                  Pruebas de migración, restricciones y RLS
 ```
 
@@ -186,6 +191,25 @@ después. Sin `ANTHROPIC_API_KEY` en el `.env`, el bot responde con un eco
 - Para probar sin molestar a clientes reales, pon en el `.env`
   `BOT_TEST_PHONES=+58 412 1234567` (varios separados por coma): solo contestará a esos.
 - La migración 0005 da por atendidos los mensajes que llegaron antes del bot.
+
+## Conocimiento del negocio
+
+Lo que el bot sabrá del negocio (horarios, productos, precios...) se carga desde un
+archivo de texto (.txt o .md). Se parte en fragmentos de unos 500 tokens y a cada uno se
+le calcula su embedding con OpenRouter (modelo `nvidia/nemotron-3.5-embed-8b:free`,
+recortado a 1024 números). Hace falta `OPENROUTER_API_KEY` en el `.env`.
+
+```bash
+cd backend
+uv run python -m app.scripts.cargar_conocimiento cargar panaderia-prueba ejemplos/panaderia_prueba.md
+uv run python -m app.scripts.cargar_conocimiento listar panaderia-prueba
+uv run python -m app.scripts.cargar_conocimiento borrar panaderia-prueba panaderia_prueba
+```
+
+- El título es el nombre del archivo (o `--titulo`). Cargar otro texto con el mismo
+  título reemplaza al anterior; cargar el mismo texto otra vez no hace nada.
+- El modelo gratuito guarda lo que se le manda: carga solo información pública.
+- Todavía el bot no usa este conocimiento al responder: eso llega en el bloque 4.5.
 
 ## Dos usuarios de base de datos
 
