@@ -23,7 +23,8 @@ El diseño completo está en el documento de la Fase 1.
 | 5.1 | Inicio de sesión del panel: contraseñas argon2, pase JWT de 15 min y sesión de 7 días | Lista (PR #13) |
 | 5.2 | Negocio, miembros y roles; invitar con enlace de un solo uso | Lista (PR #14) |
 | 5.3 | Números de WhatsApp desde el panel: conectar con QR, estado, grupos, desconectar | Lista (PR #15) |
-| 5.4 | Bandeja de conversaciones: leer, contestar como persona, tomar y devolver al bot | Esta rama |
+| 5.4 | Bandeja de conversaciones: leer, contestar como persona, tomar y devolver al bot | Lista (PR #16) |
+| 5.5 | Instrucciones del agente con historial de versiones, y horario de atención | Esta rama |
 
 ## Estructura
 
@@ -43,6 +44,7 @@ El diseño completo está en el documento de la Fase 1.
     │   ├── api/tenant.py       /tenant/...: datos del negocio, miembros, roles e invitaciones
     │   ├── api/numbers.py      /numbers/...: conectar números con QR, estado, grupos, borrar
     │   ├── api/conversations.py  /conversations/...: bandeja, mensajes, contestar, tomar, devolver
+    │   ├── api/agent.py        /agent y /hours: instrucciones del bot, versiones y horario
     │   ├── core/config.py      Lee la configuración del .env
     │   ├── core/redis.py       Conexión a Redis
     │   ├── core/queue.py       Cola ingest (ARQ): nombre y cómo encolar
@@ -61,6 +63,8 @@ El diseño completo está en el documento de la Fase 1.
     │   ├── services/audit.py   Registro de quién hizo qué (audit_logs)
     │   ├── services/numbers.py Números del negocio desde el panel y quién puede tocarlos
     │   ├── services/inbox.py   Bandeja: listar, leer, contestar, tomar, devolver, asignar, cerrar
+    │   ├── services/agent_settings.py  Instrucciones del agente (con versiones) y horario
+    │   ├── services/hours.py   Validar el horario y saber si el negocio está abierto
     │   ├── integrations/llm.py  Cliente de Claude (Anthropic)
     │   ├── workers/ingest.py   Worker ARQ de la cola ingest (+ barrido cada minuto)
     │   ├── integrations/evolution/  Cliente de Evolution API (instancias, QR, estado)
@@ -292,6 +296,22 @@ La persona invitada abre el enlace (vence a las 72 horas y sirve una sola vez):
 - Todos los roles ven la bandeja y contestan.
 - Contestar en una conversación del bot la pasa a modo humano, para que el bot no
   responda encima. Cada cambio entre bot y humano queda en `handoff_events`.
+
+## Agente y horario
+
+| Ruta | Qué hace | Quién puede |
+| --- | --- | --- |
+| `GET /agent` | Las instrucciones actuales del bot | Todos |
+| `PATCH /agent` | Cambiar nombre o instrucciones (crea una versión nueva) | Dueño y administrador |
+| `GET /agent/default-instructions` | Las instrucciones de fábrica, para restablecer | Todos |
+| `GET /agent/versions` | Historial: qué decía cada versión y quién la hizo | Todos |
+| `POST /agent/versions/{n}/restore` | Volver a una versión anterior | Dueño y administrador |
+| `GET /hours` | Horario de atención y si está abierto ahora | Todos |
+| `PUT /hours` | Guardar el horario (`{"mon": [["08:00", "12:00"]], ...}`) y el mensaje fuera de horario | Dueño y administrador |
+
+- El bot usa las instrucciones nuevas desde su siguiente respuesta.
+- Sin horario configurado, el negocio cuenta como abierto siempre. Qué hace el bot
+  fuera de horario se programa en el bloque 4.6.
 
 ## Dos usuarios de base de datos
 
