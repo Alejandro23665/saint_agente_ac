@@ -21,7 +21,8 @@ El diseño completo está en el documento de la Fase 1.
 | 4.3 | Respuesta con IA (Claude Haiku 5.5), agente del negocio y registro en `llm_runs` | Lista (PR #11) |
 | 4.4 a 4.8 | Conocimiento, RAG, pasar a humano, notas de voz y prueba final | Pendientes (falta la clave de OpenRouter) |
 | 5.1 | Inicio de sesión del panel: contraseñas argon2, pase JWT de 15 min y sesión de 7 días | Lista (PR #13) |
-| 5.2 | Negocio, miembros y roles; invitar con enlace de un solo uso | Esta rama |
+| 5.2 | Negocio, miembros y roles; invitar con enlace de un solo uso | Lista (PR #14) |
+| 5.3 | Números de WhatsApp desde el panel: conectar con QR, estado, grupos, desconectar | Esta rama |
 
 ## Estructura
 
@@ -39,6 +40,7 @@ El diseño completo está en el documento de la Fase 1.
     │   ├── api/webhooks.py     POST /webhooks/evolution/{public_id}: avisos de Evolution
     │   ├── api/auth.py         /auth/...: entrar, renovar, elegir negocio, quién soy, salir, aceptar invitación
     │   ├── api/tenant.py       /tenant/...: datos del negocio, miembros, roles e invitaciones
+    │   ├── api/numbers.py      /numbers/...: conectar números con QR, estado, grupos, borrar
     │   ├── core/config.py      Lee la configuración del .env
     │   ├── core/redis.py       Conexión a Redis
     │   ├── core/queue.py       Cola ingest (ARQ): nombre y cómo encolar
@@ -55,6 +57,7 @@ El diseño completo está en el documento de la Fase 1.
     │   ├── services/auth.py    Sesiones del panel: entrar, renovar, cerrar, freno a intentos
     │   ├── services/members.py Qué puede hacer cada rol, miembros e invitaciones
     │   ├── services/audit.py   Registro de quién hizo qué (audit_logs)
+    │   ├── services/numbers.py Números del negocio desde el panel y quién puede tocarlos
     │   ├── integrations/llm.py  Cliente de Claude (Anthropic)
     │   ├── workers/ingest.py   Worker ARQ de la cola ingest (+ barrido cada minuto)
     │   ├── integrations/evolution/  Cliente de Evolution API (instancias, QR, estado)
@@ -253,6 +256,22 @@ La persona invitada abre el enlace (vence a las 72 horas y sirve una sola vez):
   `.env` dice a qué dirección apunta.
 - Cada cambio queda en `audit_logs` (quién, qué, cuándo y desde qué IP).
 - La migración 0006 crea la tabla `tenant_invitations`, con RLS como el resto.
+
+## Números de WhatsApp desde el panel
+
+| Ruta | Qué hace | Quién puede |
+| --- | --- | --- |
+| `GET /numbers` | Los números del negocio y su estado | Todos |
+| `POST /numbers` | Conectar un número nuevo: devuelve el primer QR | Dueño y administrador |
+| `GET /numbers/{id}` | Pregunta a Evolution el estado real y lo guarda | Todos |
+| `POST /numbers/{id}/qr` | Otro QR; con `phone`, también un código de 8 letras para vincular sin cámara | Dueño y administrador |
+| `PATCH /numbers/{id}` | Encender o apagar los mensajes de grupos | Dueño y administrador |
+| `POST /numbers/{id}/disconnect` | Desvincular el teléfono (se puede volver a conectar) | Dueño y administrador |
+| `DELETE /numbers/{id}` | Borrar el número de Evolution (las conversaciones se conservan) | Solo el dueño |
+
+- Hasta 5 números por negocio.
+- El QR llega como imagen lista para mostrar (`data:image/png;base64,...`).
+- Si Evolution no responde, la API contesta 502 y no deja nada a medias.
 
 ## Dos usuarios de base de datos
 
