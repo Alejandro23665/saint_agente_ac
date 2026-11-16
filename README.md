@@ -11,8 +11,9 @@ El diseño completo está en el documento de la Fase 1.
 | 2 | Modelos SQLAlchemy, migración Alembic, RLS y pruebas | Lista (PR #1) |
 | 3.1 | App FastAPI mínima con `/health` | Lista (PR #2) |
 | 3.2 | Evolution API en Docker y cliente en Python | Lista (PR #3) |
-| 3.3 | Registrar un número en Saint (cifrado, webhook) | Esta rama |
-| 3.4–3.7 | Webhook, cola ingest, guardado de mensajes | Pendiente |
+| 3.3 | Registrar un número en Saint (cifrado, webhook) | Lista (PR #4) |
+| 3.4 | Recibir los avisos de Evolution y guardarlos en `webhook_events` | Esta rama |
+| 3.5–3.7 | Cola ingest, guardado de mensajes, estado de conexión | Pendiente |
 
 ## Estructura
 
@@ -27,10 +28,12 @@ El diseño completo está en el documento de la Fase 1.
     ├── app/
     │   ├── main.py             Crea la app FastAPI (conexiones al arrancar y apagar)
     │   ├── api/health.py       GET /health: estado de PostgreSQL y Redis
+    │   ├── api/webhooks.py     POST /webhooks/evolution/{public_id}: avisos de Evolution
     │   ├── core/config.py      Lee la configuración del .env
     │   ├── core/redis.py       Conexión a Redis
     │   ├── core/security.py    Cifrado (Fernet) y huellas de secretos
     │   ├── services/channel_registration.py  Registrar un número y su estado
+    │   ├── services/webhook_ingest.py  Validar el secreto y guardar cada aviso
     │   ├── integrations/evolution/  Cliente de Evolution API (instancias, QR, estado)
     │   ├── scripts/evolution_qr.py  Prueba manual: conectar un WhatsApp con QR
     │   ├── scripts/registrar_numero.py  Registrar el número de un negocio en Saint
@@ -98,6 +101,23 @@ uv run python -m app.scripts.registrar_numero "Panadería Prueba"
 Crea el negocio si no existe, crea el número en Evolution con su webhook apuntando a
 Saint, lo guarda en `channel_instances` (token cifrado y solo la huella del secreto del
 webhook) y espera a que escanees el QR. Necesita `FERNET_KEY` en el `.env`.
+
+## Recibir los avisos de Evolution (webhook)
+
+Evolution manda cada mensaje y cambio de estado a
+`POST /webhooks/evolution/{public_id}` con la cabecera `X-Saint-Webhook-Secret`. Saint
+comprueba el secreto, guarda el aviso tal cual en `webhook_events` (sin la `apikey`) y
+responde enseguida; si Evolution reintenta un aviso que ya estaba, no se duplica. Todavía
+no se procesa: eso llega con la cola ingest (3.5).
+
+Para probarlo, la API tiene que escuchar en todas las interfaces, porque Evolution la
+llama desde dentro de Docker (`host.docker.internal:8000`):
+
+```bash
+uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+Escribe al número conectado desde otro teléfono y mira la tabla `webhook_events`.
 
 ## Dos usuarios de base de datos
 

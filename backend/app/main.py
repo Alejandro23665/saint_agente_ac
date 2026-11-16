@@ -7,8 +7,9 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from app.api import health
+from app.api import health, webhooks
 from app.core.config import Settings, get_settings
 from app.core.redis import create_redis
 from app.db.session import build_engine
@@ -22,6 +23,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # Al arrancar: abrir las conexiones una sola vez y compartirlas entre peticiones.
         app.state.engine = build_engine(settings.database_url)
+        app.state.session_factory = async_sessionmaker(app.state.engine, expire_on_commit=False)
         app.state.redis = create_redis(settings.redis_url)
         yield
         # Al apagar: cerrarlas ordenadamente.
@@ -40,6 +42,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         openapi_url="/openapi.json" if is_dev else None,
     )
     app.include_router(health.router)
+    app.include_router(webhooks.router)
     return app
 
 
