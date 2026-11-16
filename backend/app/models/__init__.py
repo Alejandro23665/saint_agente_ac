@@ -1,4 +1,4 @@
-"""Importa todos los modelos para que Base.metadata conozca las 19 tablas.
+"""Importa todos los modelos para que Base.metadata conozca las 20 tablas.
 
 Alembic lee Base.metadata; si un modelo no se importa aquí, Alembic no lo ve.
 """
@@ -18,6 +18,7 @@ from app.models.llm_run import LLMRun
 from app.models.message import Message
 from app.models.refresh_token import RefreshToken
 from app.models.tenant import Tenant
+from app.models.tenant_invitation import TenantInvitation
 from app.models.tenant_membership import TenantMembership
 from app.models.usage_daily import UsageDaily
 from app.models.user import User
@@ -39,6 +40,7 @@ __all__ = [
     "Message",
     "RefreshToken",
     "Tenant",
+    "TenantInvitation",
     "TenantMembership",
     "UsageDaily",
     "User",
