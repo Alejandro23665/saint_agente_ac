@@ -18,7 +18,9 @@ El diseño completo está en el documento de la Fase 1.
 | 3.7 | Estado de conexión del número y prueba de punta a punta | Lista (PR #8) |
 | 4.1 | Enviar mensajes: cola de salida, reintentos y confirmación | Lista (PR #9) |
 | 4.2 | El bot espera 15 s a que el cliente termine y contesta (eco, sin IA) | Lista (PR #10) |
-| 4.3 | Respuesta con IA (Claude Haiku 5.5), agente del negocio y registro en `llm_runs` | Esta rama |
+| 4.3 | Respuesta con IA (Claude Haiku 5.5), agente del negocio y registro en `llm_runs` | Lista (PR #11) |
+| 4.4 a 4.8 | Conocimiento, RAG, pasar a humano, notas de voz y prueba final | Pendientes (falta la clave de OpenRouter) |
+| 5.1 | Inicio de sesión del panel: contraseñas argon2, pase JWT de 15 min y sesión de 7 días | Esta rama |
 
 ## Estructura
 
@@ -34,10 +36,12 @@ El diseño completo está en el documento de la Fase 1.
     │   ├── main.py             Crea la app FastAPI (conexiones al arrancar y apagar)
     │   ├── api/health.py       GET /health: estado de PostgreSQL y Redis
     │   ├── api/webhooks.py     POST /webhooks/evolution/{public_id}: avisos de Evolution
+    │   ├── api/auth.py         /auth/...: entrar, renovar, elegir negocio, quién soy, salir
     │   ├── core/config.py      Lee la configuración del .env
     │   ├── core/redis.py       Conexión a Redis
     │   ├── core/queue.py       Cola ingest (ARQ): nombre y cómo encolar
     │   ├── core/security.py    Cifrado (Fernet) y huellas de secretos
+    │   ├── core/auth_tokens.py Contraseñas (argon2) y pases de acceso (JWT)
     │   ├── services/channel_registration.py  Registrar un número y su estado
     │   ├── services/webhook_ingest.py  Validar el secreto y guardar cada aviso
     │   ├── services/webhook_processing.py  Procesar avisos: manejadores y reintentos
@@ -46,12 +50,14 @@ El diseño completo está en el documento de la Fase 1.
     │   ├── services/outbound.py  Cola de salida: guardar y enviar mensajes por Evolution
     │   ├── services/bot_reply.py  Esperar 15 s y contestar al cliente
     │   ├── services/agents.py  Agente del negocio e historial que se le manda a la IA
+    │   ├── services/auth.py    Sesiones del panel: entrar, renovar, cerrar, freno a intentos
     │   ├── integrations/llm.py  Cliente de Claude (Anthropic)
     │   ├── workers/ingest.py   Worker ARQ de la cola ingest (+ barrido cada minuto)
     │   ├── integrations/evolution/  Cliente de Evolution API (instancias, QR, estado)
     │   ├── scripts/evolution_qr.py  Prueba manual: conectar un WhatsApp con QR
     │   ├── scripts/registrar_numero.py  Registrar el número de un negocio en Saint
     │   ├── scripts/enviar_mensaje.py  Prueba manual: enviar un WhatsApp desde Saint
+    │   ├── scripts/crear_usuario.py  Crear un usuario del panel y darle acceso a un negocio
     │   ├── db/base.py          Clase Base, convención de nombres y piezas comunes
     │   ├── db/ids.py           Generador de UUID v7
     │   ├── db/session.py       Conexión y sesiones con el negocio activo (RLS)
@@ -186,6 +192,34 @@ después. Sin `ANTHROPIC_API_KEY` en el `.env`, el bot responde con un eco
 - Para probar sin molestar a clientes reales, pon en el `.env`
   `BOT_TEST_PHONES=+58 412 1234567` (varios separados por coma): solo contestará a esos.
 - La migración 0005 da por atendidos los mensajes que llegaron antes del bot.
+
+## Inicio de sesión del panel
+
+La API ya sabe quién entra al panel; la pantalla se programa en la Fase 6 (el diseño
+aprobado está en el canvas "Saint · Panel: inicio de sesión"). Hace falta `JWT_SECRET`
+en el `.env` (genera una con `python -c "import secrets; print(secrets.token_urlsafe(48))"`).
+
+```bash
+cd backend
+uv run python -m app.scripts.crear_usuario andre@saint.ai "Andre" --negocio panaderia-prueba
+```
+
+La contraseña se pide en la terminal (mínimo 10 caracteres) y no se ve al escribirla.
+
+| Ruta | Qué hace |
+| --- | --- |
+| `POST /auth/login` | Correo y contraseña. Devuelve el pase de acceso (15 min) y deja la cookie de renovación (7 días) |
+| `POST /auth/refresh` | Con la cookie, da un pase nuevo y cambia la cookie (la vieja deja de servir) |
+| `POST /auth/select-tenant` | Elige el negocio con el que se trabaja (si la persona tiene varios) |
+| `GET /auth/me` | Quién soy, mis negocios y el negocio activo |
+| `POST /auth/logout` | Cierra la sesión de este navegador |
+
+- Con un solo negocio, queda elegido al entrar. Con varios, el panel muestra la pantalla
+  de elegir negocio.
+- 5 contraseñas malas seguidas con un correo (o 20 desde una IP) bloquean 15 minutos.
+- Si alguien usa una cookie de renovación ya usada (copiada), se cierran todas las
+  sesiones de ese usuario.
+- Con la API en marcha, `http://127.0.0.1:8000/docs` permite probar las rutas.
 
 ## Dos usuarios de base de datos
 
