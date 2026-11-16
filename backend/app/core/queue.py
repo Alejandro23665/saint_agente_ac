@@ -10,6 +10,7 @@ from redis.asyncio import ConnectionPool
 INGEST_QUEUE = "saint:ingest"
 PROCESS_WEBHOOK_EVENT = "process_webhook_event"
 SEND_OUTBOUND_MESSAGE = "send_outbound_message"
+REPLY_TO_CONVERSATION = "reply_to_conversation"
 
 
 def redis_settings(url: str) -> RedisSettings:
@@ -53,6 +54,27 @@ async def enqueue_outbound(pool: ArqRedis, message_id: uuid.UUID, tenant_id: uui
         str(message_id),
         str(tenant_id),
         _job_id=outbound_job_id(message_id),
+        _queue_name=pool.default_queue_name,
+    )
+    return job is not None
+
+
+def reply_job_id(conversation_id: uuid.UUID) -> str:
+    # Un solo trabajo de respuesta por conversación: si el cliente manda 3 mensajes
+    # seguidos, el 2.º y el 3.º no crean trabajos nuevos (el que hay ya los verá).
+    return f"reply:{conversation_id}"
+
+
+async def enqueue_reply(
+    pool: ArqRedis, conversation_id: uuid.UUID, tenant_id: uuid.UUID, delay_seconds: float
+) -> bool:
+    """Programa la respuesta del bot para dentro de delay_seconds (la espera de 15 s)."""
+    job = await pool.enqueue_job(
+        REPLY_TO_CONVERSATION,
+        str(conversation_id),
+        str(tenant_id),
+        _job_id=reply_job_id(conversation_id),
+        _defer_by=delay_seconds,
         _queue_name=pool.default_queue_name,
     )
     return job is not None

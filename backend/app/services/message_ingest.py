@@ -296,8 +296,16 @@ async def store_message(
     return message_id
 
 
-async def handle_message_upsert(session: AsyncSession, event: WebhookEvent) -> None:
-    await store_message(session, event)
+async def handle_message_upsert(session: AsyncSession, event: WebhookEvent) -> uuid.UUID | None:
+    """Guarda el mensaje. Si es del cliente, devuelve su conversación para que el bot
+    programe la respuesta (bot_reply)."""
+    message_id = await store_message(session, event)
+    if message_id is None:
+        return None
+    message = await session.get(Message, message_id)
+    if message.sender_type != SenderType.CONTACT:
+        return None
+    return message.conversation_id
 
 
 async def handle_send_message(session: AsyncSession, event: WebhookEvent) -> None:

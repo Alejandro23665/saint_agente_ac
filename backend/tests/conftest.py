@@ -109,3 +109,9 @@ async def owner_session(owner_engine: AsyncEngine) -> AsyncIterator[AsyncSession
             await session.close()
             if trans.is_active:
                 await trans.rollback()
+
+
+@pytest.fixture(autouse=True)
+def bot_answers_everyone(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Las pruebas no dependen de BOT_TEST_PHONES del .env de quien las corre."""
+    monkeypatch.setattr(get_settings(), "bot_test_phones", "")

@@ -16,7 +16,8 @@ El diseño completo está en el documento de la Fase 1.
 | 3.5 | Cola ingest (ARQ): el worker procesa cada aviso, con reintentos | Lista (PR #6) |
 | 3.6 | Cada aviso de mensaje se convierte en contacto, conversación y mensaje | Lista (PR #7) |
 | 3.7 | Estado de conexión del número y prueba de punta a punta | Lista (PR #8) |
-| 4.1 | Enviar mensajes: cola de salida, reintentos y confirmación | Esta rama |
+| 4.1 | Enviar mensajes: cola de salida, reintentos y confirmación | PR #9 |
+| 4.2 | El bot espera 15 s a que el cliente termine y contesta (eco, sin IA) | Esta rama |
 
 ## Estructura
 
@@ -42,6 +43,7 @@ El diseño completo está en el documento de la Fase 1.
     │   ├── services/message_ingest.py  Aviso de mensaje -> contacto, conversación, mensaje
     │   ├── services/connection_events.py  Aviso de conexión -> estado del número
     │   ├── services/outbound.py  Cola de salida: guardar y enviar mensajes por Evolution
+    │   ├── services/bot_reply.py  Esperar 15 s y contestar al cliente (por ahora, un eco)
     │   ├── workers/ingest.py   Worker ARQ de la cola ingest (+ barrido cada minuto)
     │   ├── integrations/evolution/  Cliente de Evolution API (instancias, QR, estado)
     │   ├── scripts/evolution_qr.py  Prueba manual: conectar un WhatsApp con QR
@@ -161,6 +163,20 @@ Prueba manual, con la API, Evolution y el worker en marcha:
 ```bash
 uv run python -m app.scripts.enviar_mensaje panaderia-prueba "+58 412 1234567" "Hola"
 ```
+
+## Respuesta del bot (espera de 15 s)
+
+Cuando un cliente escribe, el worker programa la respuesta para dentro de 15 s. Si el
+cliente manda otro mensaje antes, la espera vuelve a empezar; si no para de escribir, se
+contesta igual a los 2 minutos. Luego el bot lee todos los mensajes pendientes juntos y
+contesta una sola vez. Por ahora la respuesta es un eco ("Recibí: ..."); en el bloque
+4.3 la escribirá la IA.
+
+- No contesta si la conversación la atiende una persona (`mode` distinto de `bot`), en
+  grupos, ni a mensajes de hace más de una hora.
+- Para probar sin molestar a clientes reales, pon en el `.env`
+  `BOT_TEST_PHONES=+58 412 1234567` (varios separados por coma): solo contestará a esos.
+- La migración 0005 da por atendidos los mensajes que llegaron antes del bot.
 
 ## Dos usuarios de base de datos
 
