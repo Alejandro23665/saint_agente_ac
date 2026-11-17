@@ -172,7 +172,8 @@ Ver el detalle de cada riesgo (con archivo y línea) en [RIESGOS.md](RIESGOS.md)
     │   ├── env.py              Cómo se conecta Alembic
     │   └── versions/           0001 esquema inicial (tablas, índices, ENUM y RLS) · 0002 avisos
     │                           pendientes · 0003 estado de conexión · 0004 cola de salida ·
-    │                           0005 respuestas pendientes · 0006 invitaciones
+    │                           0005 respuestas pendientes · 0006 invitaciones ·
+    │                           0007 negocio activo y envíos atascados
     ├── ejemplos/               Texto de ejemplo para cargar como conocimiento
     ├── logs/                   Registros de la API, el worker y el panel al correrlos en segundo plano
     └── tests/                  Pruebas de migración, RLS, webhooks, bot, panel y consumo
@@ -191,7 +192,7 @@ docker compose up -d            # PostgreSQL, Redis y Evolution API
 
 cd backend
 uv sync                         # crea .venv e instala las dependencias
-uv run alembic upgrade head     # crea las 20 tablas (migraciones 0001 a 0006)
+uv run alembic upgrade head     # crea las 20 tablas (migraciones 0001 a 0007)
 ```
 
 Después hay que crear tu negocio y tu usuario (una sola vez): primero
@@ -251,7 +252,7 @@ Copia `.env.example` a `.env`. Las claves van **solo** ahí, nunca en el código
 
 | Dónde | Comando | Qué cubre |
 |-------|---------|-----------|
-| Backend | `cd backend && uv run pytest` | 252 pruebas: migraciones, RLS, webhooks, cola, bot, sesión, miembros, bandeja, agente, conocimiento, consumo. Necesita PostgreSQL y Redis; crea y borra la base `saint_test` |
+| Backend | `cd backend && uv run pytest` | 259 pruebas: migraciones, RLS, webhooks, cola, bot, sesión, miembros, bandeja, agente, conocimiento, consumo. Necesita PostgreSQL y Redis; crea y borra la base `saint_test` |
 | Backend | `uv run ruff check . && uv run ruff format --check .` | Lint y formato |
 | Panel | `cd frontend && npm test` | 115 pruebas con la API simulada |
 | Panel | `npm run typecheck` · `npm run build` | Revisión de tipos y compilación |
@@ -326,6 +327,8 @@ de WhatsApp; después los avisos `messages.update` lo pasan a `delivered` y `rea
 - Evolution caído o error 5xx, o el número desconectado: se reintenta (hasta 5 veces).
 - Evolution no responde a tiempo: se queda en `sending` y **no** se reintenta, para no
   mandarlo dos veces. El aviso `send.message` de Evolution confirma que sí salió.
+  Si a los 10 minutos no llegó ese aviso, el barrido lo marca `failed` con un aviso
+  ("puede que haya salido"); si el aviso llega después, igual pasa a `sent`.
 - Si Redis estaba caído al encolar, el barrido de cada minuto lo encuentra.
 
 Prueba manual, con la API, Evolution y el worker en marcha:
@@ -349,7 +352,8 @@ después. Sin `ANTHROPIC_API_KEY` en el `.env`, el bot responde con un eco
 ("Recibí: ...").
 
 - No contesta si la conversación la atiende una persona (`mode` distinto de `bot`), en
-  grupos, ni a mensajes de hace más de una hora.
+  grupos, a contactos bloqueados, en negocios desactivados o borrados (su webhook
+  responde 404 desde la migración 0007), ni a mensajes de hace más de una hora.
 - Para probar sin molestar a clientes reales, pon en el `.env`
   `BOT_TEST_PHONES=+58 412 1234567` (varios separados por coma): solo contestará a esos.
 - La migración 0005 da por atendidos los mensajes que llegaron antes del bot.
