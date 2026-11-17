@@ -14,8 +14,10 @@ from app.db.session import tenant_session
 from app.integrations.evolution import EvolutionClient
 from app.models import ChannelInstance, Contact, Conversation, Message, WebhookEvent
 from app.models.enums import InstanceStatus, MessageStatus, SenderType
+from app.services.message_ingest import STUCK_ERROR
 from app.services.outbound import (
     SendOutcome,
+    fail_stuck_sending,
     find_queued_messages,
     jid_for_phone,
     queue_text_to_phone,
@@ -246,6 +248,95 @@ async def test_barrido_encuentra_los_que_quedaron_en_cola(owner_engine, factory)
         )
     found = [message_id for message_id, _ in await find_queued_messages(factory=factory)]
     assert old_id in found and new_id not in found
+
+
+async def make_stuck(owner_engine, factory, tenant_id, instance_id, text, minutes):
+    """Un mensaje en 'sending' desde hace `minutes` minutos (Evolution no respondió)."""
+    message_id = await queue(factory, tenant_id, instance_id, text)
+    await send(FakeEvolution(fail=httpx.ReadTimeout("lento")), factory, tenant_id, message_id)
+    async with AsyncSession(owner_engine) as s, s.begin():
+        await s.execute(
+            update(Message)
+            .where(Message.id == message_id)
+            .values(updated_at=func.now() - timedelta(minutes=minutes))
+        )
+    return message_id
+
+
+async def test_atascado_en_sending_queda_fallido(owner_engine, factory) -> None:
+    tenant_id, instance_id, _ = await new_number(owner_engine)
+    old_id = await make_stuck(owner_engine, factory, tenant_id, instance_id, "viejo", 11)
+    new_id = await make_stuck(owner_engine, factory, tenant_id, instance_id, "nuevo", 2)
+
+    stuck = await fail_stuck_sending(factory=factory)
+    assert (old_id, tenant_id) in stuck
+    assert new_id not in [m for m, _ in stuck]
+
+    old = await load(factory, tenant_id, old_id)
+    assert (old.status, old.error) == (MessageStatus.FAILED, STUCK_ERROR)
+    assert (await load(factory, tenant_id, new_id)).status == MessageStatus.SENDING
+    # Una segunda pasada no lo vuelve a tocar.
+    assert old_id not in [m for m, _ in await fail_stuck_sending(factory=factory)]
+
+
+async def test_confirmacion_tardia_lo_marca_enviado(owner_engine, factory) -> None:
+    """Si el aviso send.message llega después del barrido, el mensaje sí salió."""
+    tenant_id, instance_id, _ = await new_number(owner_engine)
+    message_id = await make_stuck(owner_engine, factory, tenant_id, instance_id, "Ya voy", 11)
+    await fail_stuck_sending(factory=factory)
+
+    data = {
+        "key": {"remoteJid": JID, "fromMe": True, "id": "3EB0MUYTARDE"},
+        "message": {"conversation": "Ya voy"},
+        "messageType": "conversation",
+        "messageTimestamp": 1763250000,
+    }
+    async with AsyncSession(owner_engine) as s, s.begin():
+        event = WebhookEvent(
+            tenant_id=tenant_id,
+            channel_instance_id=instance_id,
+            event_type="send.message",
+            external_id="3EB0MUYTARDE",
+            payload={"event": "send.message", "data": data},
+        )
+        s.add(event)
+        await s.flush()
+        event_id = event.id
+    await process_event(event_id, tenant_id, factory=factory)
+
+    message = await load(factory, tenant_id, message_id)
+    assert (message.status, message.external_id, message.error) == (
+        MessageStatus.SENT,
+        "3EB0MUYTARDE",
+        None,
+    )
+    async with tenant_session(tenant_id, factory=factory) as s:
+        count = await s.scalar(
+            select(func.count())
+            .select_from(Message)
+            .where(Message.channel_instance_id == instance_id)
+        )
+    assert count == 1  # no se duplicó
+
+
+async def test_barrido_del_worker_marca_atascados(owner_engine, factory) -> None:
+    tenant_id, instance_id, _ = await new_number(owner_engine)
+    message_id = await make_stuck(owner_engine, factory, tenant_id, instance_id, "hola", 11)
+    published: list[str] = []
+
+    class Panel:
+        default_queue_name = "saint:ingest"
+
+        async def publish(self, channel: str, payload: str) -> int:
+            published.append(channel)
+            return 0
+
+        async def enqueue_job(self, *args, **kwargs):
+            return object()
+
+    await ingest.requeue_stuck_events({"factory": factory, "redis": Panel()})
+    assert (await load(factory, tenant_id, message_id)).status == MessageStatus.FAILED
+    assert any(str(tenant_id) in channel for channel in published)
 
 
 class NoPanel:

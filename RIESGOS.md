@@ -8,22 +8,32 @@ Prioridad: **Alta** (puede afectar a clientes reales o a la seguridad), **Media*
 
 ## Errores
 
-- [ ] **Alta · Negocios desactivados siguen funcionando.** La función SQL
-  `resolve_channel_instance` (`backend/migrations/versions/0001_esquema_inicial.py:118-125`)
-  solo revisa `channel_instances.deleted_at`, no `tenants.is_active` ni
-  `tenants.deleted_at`. Los avisos de un negocio desactivado se siguen guardando y el bot
-  sigue contestando. `open_invitation` (0006:109) sí lo revisa.
-- [ ] **Alta · Los contactos bloqueados reciben respuesta del bot.** `_bot_answers`
-  (`backend/app/services/bot_reply.py:290-298`) no mira `contacts.blocked`.
+- [x] **Alta · Negocios desactivados siguen funcionando.** Resuelto (17/11, migración
+  0007): `resolve_channel_instance` ahora también exige `tenants.is_active` y
+  `tenants.deleted_at` vacío, así que el webhook de un negocio desactivado o borrado
+  responde 404 y no se guarda nada. Además el bot no contesta lo que ya estaba pendiente
+  cuando se desactivó (`_bot_answers` en `bot_reply.py`), ni envía una respuesta que la IA
+  estaba escribiendo en ese momento. Pruebas: `test_negocio_desactivado_o_borrado` y
+  `test_negocio_desactivado_no_contesta`.
+  Antes: la función solo revisaba `channel_instances.deleted_at`.
+- [x] **Alta · Los contactos bloqueados reciben respuesta del bot.** Resuelto (17/11):
+  `_bot_answers` (`bot_reply.py`) mira `contacts.blocked`; sus mensajes se guardan y se
+  ven en la bandeja, pero el bot no les contesta (tampoco si los bloquean mientras la IA
+  escribe). Prueba: `test_contacto_bloqueado_no_recibe_respuesta`.
 - [x] **Alta · Enlace de invitación sin pantalla.** Resuelto en el bloque 6.2: página
   `/invitacion` (`frontend/src/pages/AcceptInvitation.tsx`), que no pierde el token.
   Antes: el backend armaba
   `{PANEL_URL}/invitacion#token` (`backend/app/services/members.py:147`), pero el panel no
   tenía esa ruta. Sin sesión, redirigía a iniciar sesión y perdía el token; con sesión,
   redirigía a `/`.
-- [ ] **Media · Mensajes que se quedan en `sending` para siempre.** Si Evolution no
-  responde a tiempo o el worker se cae entre marcar `sending` y enviar, el barrido no lo
-  ve: `queued_outbound_messages` (migración 0004:42) solo busca `queued`.
+- [x] **Media · Mensajes que se quedan en `sending` para siempre.** Resuelto (17/11,
+  migración 0007): el barrido de cada minuto busca los que llevan más de 10 minutos en
+  `sending` (`stuck_sending_messages`) y los marca `failed` con el aviso "Evolution no
+  confirmó el envío... puede que haya salido" (`outbound.fail_stuck_sending`). No se
+  reenvían solos para no mandarlos dos veces. Si después llega el aviso `send.message`,
+  el mensaje pasa a `sent` sin duplicarse. Pruebas: `test_atascado_en_sending_queda_fallido`,
+  `test_confirmacion_tardia_lo_marca_enviado` y `test_barrido_del_worker_marca_atascados`.
+  Antes: `queued_outbound_messages` (0004) solo buscaba `queued`.
 - [ ] **Media · Un 429 de Evolution se trata como error permanente.** `outbound.py:178`
   marca `failed` ante cualquier 4xx; el 429 (demasiadas peticiones) debería reintentarse.
 - [ ] **Media · La respuesta del dueño desde su teléfono no pasa la conversación a
@@ -97,8 +107,9 @@ Prioridad: **Alta** (puede afectar a clientes reales o a la seguridad), **Media*
 
 ## Orden y mantenimiento
 
-- [ ] **La carpeta no es un repositorio git.** Solo existe `saint_agente_ac-fase2.bundle`
-  (fase 2). Todo lo demás no tiene historial.
+- [ ] **La carpeta no es un repositorio git.** El código ya está en GitHub (rama
+  `claude/project-thread-4ajxho`, 16/11), pero la carpeta del PC sigue sin git: los cambios
+  se copian a mano. Falta fusionar los PRs #11 a #20 y esta rama en `main`.
 - [ ] `backend/logs/` (unos 7 MB, con `public_id` de webhooks) no está en `.gitignore`.
 - [ ] La última corrida del worker (`backend/logs/worker_5_7.log`) terminó perdiendo la
   conexión con Redis ("Acceso denegado").
@@ -106,7 +117,7 @@ Prioridad: **Alta** (puede afectar a clientes reales o a la seguridad), **Media*
 - [ ] `docker-compose.override.yml.bak` no está activo (por el `.bak`); el puerto 5433 se
   toma de `POSTGRES_PORT` en `.env`.
 - [ ] README: dice "crea las 19 tablas" (línea 110) pero son 20, y en la estructura solo
-  menciona la migración 0001 (hay seis). `migrations/env.py:11` también dice 19.
+  menciona la migración 0001 (hay siete). `migrations/env.py:11` también dice 19.
 - [ ] El modelo `claude-haiku-5-5` está escrito en dos sitios (`models/agent.py:27` y
   `services/agents.py:24`).
 - [ ] `app_role()` está copiada en las migraciones 0002, 0004, 0005 y 0006, y las
@@ -129,8 +140,8 @@ Prioridad: **Alta** (puede afectar a clientes reales o a la seguridad), **Media*
   cifra desaparecería en los periodos viejos aunque los tokens sigan. Hay que guardarla también
   en `usage_daily` (columna nueva y migración) antes de borrar `llm_runs`.
 - [ ] **Baja · Consumo: un envío sin respuesta de Evolution puede no contarse.** Si el envío
-  queda en `sending` (tiempo agotado) y el aviso `send.message` nunca llega, ese mensaje no suma
-  a "enviados" aunque quizá sí salió.
+  queda sin respuesta (tiempo agotado) y el aviso `send.message` nunca llega, a los 10 minutos
+  queda `failed` y no suma a "enviados", aunque quizá sí salió.
 - [ ] **Baja · Consumo: no hay costo sin precios.** Sin `LLM_INPUT_USD_PER_MILLION` y
   `LLM_OUTPUT_USD_PER_MILLION` en el `.env` el panel solo muestra tokens. Y `audio_seconds`
   sigue en cero hasta el bloque 4.7.

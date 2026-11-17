@@ -13,7 +13,7 @@ Redis fallan un momento, el mensaje no se pierde y se reintenta.
 import logging
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 
 from sqlalchemy import func, select, text, update
@@ -32,11 +32,15 @@ from app.models.enums import (
     SenderType,
 )
 from app.services import usage
-from app.services.message_ingest import open_conversation
+from app.services.message_ingest import STUCK_ERROR, open_conversation
 
 logger = logging.getLogger(__name__)
 
 MAX_ERROR_LENGTH = 500
+# Un mensaje que lleva este tiempo en 'sending' sin confirmación se da por fallido.
+STUCK_SENDING_SECONDS = 10 * 60
+# El error que se guarda en ese caso es message_ingest.STUCK_ERROR: si después llega
+# el aviso send.message, el mensaje pasa igual a 'sent'.
 
 
 class SendOutcome(StrEnum):
@@ -243,3 +247,45 @@ async def find_queued_messages(
             {"secs": older_than_seconds, "limit": limit},
         )
         return [(row.id, row.tenant_id) for row in rows]
+
+
+async def fail_stuck_sending(
+    older_than_seconds: int = STUCK_SENDING_SECONDS,
+    limit: int = 100,
+    factory: async_sessionmaker[AsyncSession] = SessionFactory,
+) -> list[tuple[uuid.UUID, uuid.UUID]]:
+    """Marca 'failed' los mensajes atascados en 'sending' y devuelve (id, negocio).
+
+    Pasa cuando Evolution no respondió a tiempo y nunca llegó el aviso send.message, o
+    cuando el worker se cayó justo después de marcarlo. No se reenvía solo, porque puede
+    que sí haya salido y el cliente lo recibiría dos veces; queda 'failed' con un aviso
+    para que el negocio lo vea en la bandeja.
+    """
+    async with factory() as session, session.begin():
+        rows = (
+            await session.execute(
+                text(
+                    "SELECT id, tenant_id FROM stuck_sending_messages("
+                    "make_interval(secs => :secs), :limit)"
+                ),
+                {"secs": older_than_seconds, "limit": limit},
+            )
+        ).all()
+    failed: list[tuple[uuid.UUID, uuid.UUID]] = []
+    for message_id, tenant_id in rows:
+        async with tenant_session(tenant_id, factory=factory) as session:
+            # Se vuelve a comprobar: el aviso send.message pudo llegar mientras tanto.
+            changed = await session.scalar(
+                update(Message)
+                .where(
+                    Message.id == message_id,
+                    Message.status == MessageStatus.SENDING,
+                    Message.updated_at < func.now() - timedelta(seconds=older_than_seconds),
+                )
+                .values(status=MessageStatus.FAILED, error=STUCK_ERROR)
+                .returning(Message.id)
+            )
+        if changed is not None:
+            logger.error("Mensaje %s: sin confirmación de Evolution, queda fallido", message_id)
+            failed.append((message_id, tenant_id))
+    return failed

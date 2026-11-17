@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import func, select, text, update
+from sqlalchemy import and_, func, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -47,6 +47,13 @@ CONTENT_TYPES: dict[str, ContentType] = {
     "locationMessage": ContentType.LOCATION,
     "liveLocationMessage": ContentType.LOCATION,
 }
+
+# Error de un saliente que se quedó en 'sending' sin confirmación (outbound.fail_stuck_
+# sending). Si luego llega su aviso send.message, igual se marca como enviado.
+STUCK_ERROR = (
+    "Evolution no confirmó el envío en 10 minutos. Puede que haya salido: revísalo en "
+    "WhatsApp antes de volver a mandarlo."
+)
 
 # Estados de WhatsApp (messages.update) -> nuestro estado. Orden: solo se avanza.
 STATUS_MAP: dict[str, MessageStatus] = {
@@ -360,7 +367,11 @@ async def _confirm_our_send(
         .where(
             Message.channel_instance_id == event.channel_instance_id,
             Message.direction == MessageDirection.OUTBOUND,
-            Message.status == MessageStatus.SENDING,
+            # También uno que el barrido dio por fallido sin confirmación (outbound).
+            or_(
+                Message.status == MessageStatus.SENDING,
+                and_(Message.status == MessageStatus.FAILED, Message.error == STUCK_ERROR),
+            ),
             Message.external_id.is_(None),
             Message.content_type == parsed.content_type,
             Message.text == parsed.text,
@@ -374,6 +385,7 @@ async def _confirm_our_send(
         return False
     ours.external_id = parsed.external_id
     ours.status = MessageStatus.SENT
+    ours.error = None
     moment = parsed.timestamp or datetime.now(UTC)
     # Es el momento en que sabemos que salió (el worker no pudo confirmarlo).
     await usage.record(session, event.tenant_id, at=moment, outbound_messages=1)

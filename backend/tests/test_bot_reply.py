@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from app.core.config import get_settings
 from app.core.queue import REPLY_TO_CONVERSATION, SEND_OUTBOUND_MESSAGE, reply_job_id
 from app.db.session import tenant_session
-from app.models import Conversation, Message, WebhookEvent
+from app.models import Contact, Conversation, Message, Tenant, WebhookEvent
 from app.models.enums import (
     ConversationMode,
     MessageDirection,
@@ -159,6 +159,27 @@ async def test_conversacion_atendida_por_una_persona(chat: Chat) -> None:
     assert (await chat.answer()).outcome == ReplyOutcome.NOT_BOT
     [message] = await chat.messages()
     assert message.processed_at is not None  # el bot no lo contestará después
+
+
+async def test_contacto_bloqueado_no_recibe_respuesta(chat: Chat) -> None:
+    await chat.receive(upsert("M1"))
+    async with AsyncSession(chat.owner_engine) as s, s.begin():
+        await s.execute(update(Contact).values(blocked=True))
+    await chat.age(16)
+    assert (await chat.answer()).outcome == ReplyOutcome.NOT_BOT
+    [message] = await chat.messages()  # no hay respuesta en la cola
+    assert message.processed_at is not None
+
+
+async def test_negocio_desactivado_no_contesta(chat: Chat) -> None:
+    """Lo que ya estaba pendiente cuando se desactivó el negocio tampoco se contesta."""
+    await chat.receive(upsert("M1"))
+    async with AsyncSession(chat.owner_engine) as s, s.begin():
+        await s.execute(update(Tenant).where(Tenant.id == chat.tenant_id).values(is_active=False))
+    await chat.age(16)
+    assert (await chat.answer()).outcome == ReplyOutcome.NOT_BOT
+    [message] = await chat.messages()
+    assert message.processed_at is not None
 
 
 async def test_lista_de_telefonos_de_prueba(chat: Chat, monkeypatch) -> None:

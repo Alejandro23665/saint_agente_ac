@@ -36,7 +36,12 @@ from app.services.bot_reply import (
     find_conversations_awaiting_reply,
 )
 from app.services.knowledge import embed_source
-from app.services.outbound import SendOutcome, find_queued_messages, send_queued_message
+from app.services.outbound import (
+    SendOutcome,
+    fail_stuck_sending,
+    find_queued_messages,
+    send_queued_message,
+)
 from app.services.webhook_processing import (
     MAX_ATTEMPTS,
     Outcome,
@@ -177,6 +182,11 @@ async def requeue_stuck_events(ctx: dict[str, Any]) -> int:
         queued += await enqueue_reply(ctx["redis"], conversation_id, tenant_id, 0)
     if queued:
         logger.info("Barrido: %s trabajos pendientes vueltos a encolar", queued)
+    # Mensajes atascados en 'sending' (sin confirmación de Evolution): quedan fallidos y
+    # la bandeja se actualiza para que el negocio lo vea.
+    stuck = await fail_stuck_sending(factory=ctx["factory"])
+    for tenant_id in {tenant_id for _, tenant_id in stuck}:
+        await events.publish(ctx["redis"], tenant_id, events.INBOX_CHANGED)
     return queued
 
 

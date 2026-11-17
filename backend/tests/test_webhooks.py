@@ -6,14 +6,14 @@ from dataclasses import dataclass
 
 import httpx
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from app.api.webhooks import get_queue, get_session_factory
 from app.core.security import hash_secret, new_secret
 from app.db.session import tenant_session
 from app.main import create_app
-from app.models import ChannelInstance, WebhookEvent
+from app.models import ChannelInstance, Tenant, WebhookEvent
 from app.models.enums import WebhookEventStatus
 from app.services.channel_registration import WEBHOOK_SECRET_HEADER
 from app.services.webhook_ingest import extract_external_id
@@ -188,6 +188,19 @@ async def test_numero_desconocido(client) -> None:
         "/webhooks/evolution/no-existe", json=message(), headers={WEBHOOK_SECRET_HEADER: "x"}
     )
     assert response.status_code == 404
+
+
+@pytest.mark.parametrize("change", [{"is_active": False}, {"deleted_at": func.now()}])
+async def test_negocio_desactivado_o_borrado(
+    owner_engine: AsyncEngine, client, factory, change
+) -> None:
+    """Si el negocio está desactivado o borrado, su número deja de recibir avisos."""
+    number = await new_number(owner_engine)
+    async with AsyncSession(owner_engine) as s, s.begin():
+        await s.execute(update(Tenant).where(Tenant.id == number.tenant_id).values(**change))
+    response = await client.post(number.url, json=message(), headers=number.headers)
+    assert response.status_code == 404
+    assert await events_of(number, factory) == []
 
 
 async def test_cuerpo_invalido(owner_engine: AsyncEngine, client) -> None:

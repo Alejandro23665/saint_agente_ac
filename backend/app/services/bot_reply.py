@@ -28,7 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.core.config import get_settings
 from app.db.session import SessionFactory, tenant_session
 from app.integrations.llm import LLMClient, LLMError, LLMReply
-from app.models import Contact, Conversation, LLMRun, Message
+from app.models import Contact, Conversation, LLMRun, Message, Tenant
 from app.models.enums import (
     ContentType,
     ConversationMode,
@@ -150,10 +150,11 @@ async def answer_conversation(
     # 3) Guardar. Si mientras tanto el cliente escribió otra cosa, esta respuesta ya no
     #    sirve: se descarta y se vuelve a esperar los 15 s para contestar todo junto.
     async with tenant_session(tenant_id, factory=factory) as session:
-        conversation, contact = (
+        conversation, contact, tenant = (
             await session.execute(
-                select(Conversation, Contact)
+                select(Conversation, Contact, Tenant)
                 .join(Contact, Contact.id == Conversation.contact_id)
+                .join(Tenant, Tenant.id == Conversation.tenant_id)
                 .where(Conversation.id == conversation_id)
                 .with_for_update(of=Conversation)
             )
@@ -199,8 +200,9 @@ async def answer_conversation(
             llm_output_tokens=run.output_tokens,
         )
 
-        if not _bot_answers(conversation, contact) or answered:
-            # La conversación pasó a una persona o ya le contestaron: no se envía.
+        if not _bot_answers(tenant, conversation, contact) or answered:
+            # La conversación pasó a una persona, ya le contestaron, o mientras la IA
+            # escribía bloquearon al contacto o desactivaron el negocio: no se envía.
             run.status = LLMRunStatus.DISCARDED
             await _mark_processed(session, pending_ids)
             return ReplyResult(ReplyOutcome.NOT_BOT if not answered else ReplyOutcome.NOTHING)
@@ -249,15 +251,16 @@ async def _ready_to_answer(
     # La conversación bloqueada: dos workers nunca contestan a la vez el mismo chat.
     row = (
         await session.execute(
-            select(Conversation, Contact)
+            select(Conversation, Contact, Tenant)
             .join(Contact, Contact.id == Conversation.contact_id)
+            .join(Tenant, Tenant.id == Conversation.tenant_id)
             .where(Conversation.id == conversation_id)
             .with_for_update(of=Conversation, skip_locked=True)
         )
     ).first()
     if row is None:
         return ReplyResult(ReplyOutcome.SKIPPED)
-    conversation, contact = row
+    conversation, contact, tenant = row
 
     pending = list(
         await session.scalars(
@@ -274,8 +277,9 @@ async def _ready_to_answer(
         return ReplyResult(ReplyOutcome.NOTHING)
     pending_ids = [m.id for m in pending]
 
-    if not _bot_answers(conversation, contact):
-        # Lo atiende una persona (o es un grupo, o no está en la lista de prueba):
+    if not _bot_answers(tenant, conversation, contact):
+        # Lo atiende una persona (o es un grupo, el contacto está bloqueado, el negocio
+        # está desactivado o el teléfono no está en la lista de prueba):
         # se dan por vistos para que el bot no los conteste después.
         await _mark_processed(session, pending_ids)
         return ReplyResult(ReplyOutcome.NOT_BOT)
@@ -294,7 +298,11 @@ async def _ready_to_answer(
     return pending_ids, fresh
 
 
-def _bot_answers(conversation: Conversation, contact: Contact) -> bool:
+def _bot_answers(tenant: Tenant, conversation: Conversation, contact: Contact) -> bool:
+    if not tenant.is_active or tenant.deleted_at is not None:
+        return False  # negocio desactivado: lo que ya estaba en cola no se contesta
+    if contact.blocked:
+        return False  # el negocio bloqueó a este contacto
     if conversation.status != ConversationStatus.OPEN:
         return False
     if conversation.mode != ConversationMode.BOT:
