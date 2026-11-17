@@ -41,7 +41,7 @@ export function ConversationPane({ id, backTo }: { id: string; backTo: string })
 
   async function refreshAll() {
     await Promise.all([conversation.reload(), thread.reload()]);
-    refreshDashboard(["conversations"]);
+    refreshDashboard(["counts"]);
   }
 
   useEvents(["conversation.changed"], (event) => {

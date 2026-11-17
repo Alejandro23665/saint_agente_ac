@@ -110,6 +110,14 @@ export interface NumberWithQr {
 export type ConversationMode = "bot" | "human" | "paused";
 export type ConversationStatus = "open" | "closed";
 
+// GET /conversations/counts: sobre todas las conversaciones abiertas del negocio.
+export interface InboxCounts {
+  open: number;
+  waiting: number; // el cliente espera respuesta
+  human: number; // las atiende una persona
+  mine: number; // asignadas a quien mira
+}
+
 export interface Conversation {
   id: string;
   status: ConversationStatus;

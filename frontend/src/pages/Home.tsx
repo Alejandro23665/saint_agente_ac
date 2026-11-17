@@ -8,16 +8,16 @@ import { useDashboard, useInboxCounts } from "../layout/dashboard";
 import { phone } from "../lib/format";
 import { NUMBER_STATUS, statusOf } from "../lib/status";
 
-function Count({ value, capped }: { value: number | undefined; capped?: boolean }) {
+function Count({ value }: { value: number | undefined }) {
   if (value === undefined) return <span className="skeleton" aria-label="Cargando" />;
-  return <strong>{capped ? "100+" : value}</strong>;
+  return <strong>{value.toLocaleString("es")}</strong>;
 }
 
-function Stat({ label, value, capped, highlight }: { label: string; value?: number; capped?: boolean; highlight?: boolean }) {
+function Stat({ label, value, highlight }: { label: string; value?: number; highlight?: boolean }) {
   return (
     <Link to="/bandeja" className={highlight ? "stat stat-highlight" : "stat"}>
       <span>{label}</span>
-      <Count value={value} capped={capped} />
+      <Count value={value} />
     </Link>
   );
 }
@@ -32,7 +32,7 @@ interface Step {
 export function Home() {
   const { session } = useAuth();
   const data = useDashboard();
-  const counts = useInboxCounts(session?.user.id ?? "");
+  const counts = useInboxCounts();
   if (!session?.active_tenant) return null;
   const tenant = session.active_tenant;
   const firstName = session.user.full_name.split(" ")[0];
@@ -81,7 +81,7 @@ export function Home() {
       )}
 
       <section className="stats" aria-label="Resumen de la bandeja">
-        <Stat label="Conversaciones abiertas" value={counts?.open} capped={counts?.capped} />
+        <Stat label="Conversaciones abiertas" value={counts?.open} />
         <Stat label="Esperan respuesta" value={counts?.waiting} highlight />
         <Stat label="Las atiende una persona" value={counts?.human} />
         <Stat label="Asignadas a mí" value={counts?.mine} />

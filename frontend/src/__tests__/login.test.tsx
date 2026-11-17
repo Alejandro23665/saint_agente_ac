@@ -34,6 +34,7 @@ function fakeApi(login: (body: Record<string, unknown>) => Response) {
     if (url === "/events") return new Response(null, { status: 503 });
     if (url === "/hours") return json(200, { days: {}, open_now: true, timezone: "America/Caracas" });
     if (url === "/agent") return json(200, { version: 1 });
+    if (url === "/conversations/counts") return json(200, { open: 1, waiting: 1, human: 0, mine: 0 });
     if (url.startsWith("/conversations"))
       return json(200, [{ id: "c1", status: "open", mode: "bot", waiting_reply: true, assigned: null, last_message_at: null }]);
     if (url === "/numbers") return json(200, [{ id: "n1", phone: "+58 412 0000000", status: "open" }]);

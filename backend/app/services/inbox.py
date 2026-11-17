@@ -94,6 +94,17 @@ class MessageRow:
     created_at: datetime
 
 
+def _waiting_reply():
+    """El cliente escribió y nadie le contestó todavía."""
+    return and_(
+        Conversation.last_inbound_at.is_not(None),
+        or_(
+            Conversation.last_outbound_at.is_(None),
+            Conversation.last_inbound_at > Conversation.last_outbound_at,
+        ),
+    )
+
+
 def _conversation_query() -> Select:
     """Conversación + contacto + número + persona asignada + último mensaje."""
     last = (
@@ -119,13 +130,7 @@ def _conversation_query() -> Select:
             Conversation.last_message_at,
             last.c.text,
             last.c.direction,
-            and_(
-                Conversation.last_inbound_at.is_not(None),
-                or_(
-                    Conversation.last_outbound_at.is_(None),
-                    Conversation.last_inbound_at > Conversation.last_outbound_at,
-                ),
-            ),
+            _waiting_reply(),
             Conversation.created_at,
         )
         .join(Contact, Contact.id == Conversation.contact_id)
@@ -172,6 +177,27 @@ async def list_conversations(
     async with tenant_session(member.tenant_id, member.user_id, factory=factory) as session:
         rows = await session.execute(query)
         return [ConversationRow(*row) for row in rows]
+
+
+@dataclass(frozen=True)
+class InboxCounts:
+    open: int  # conversaciones abiertas
+    waiting: int  # abiertas en las que el cliente espera respuesta
+    human: int  # abiertas que atiende una persona
+    mine: int  # abiertas asignadas a quien pregunta
+
+
+async def count_conversations(member: Member, *, factory: Factory = SessionFactory) -> InboxCounts:
+    """Los contadores de Inicio y del menú, contando todas las abiertas (sin tope)."""
+    query = select(
+        func.count(),
+        func.count().filter(_waiting_reply()),
+        func.count().filter(Conversation.mode == ConversationMode.HUMAN),
+        func.count().filter(Conversation.assigned_user_id == member.user_id),
+    ).where(Conversation.status == ConversationStatus.OPEN)
+    async with tenant_session(member.tenant_id, member.user_id, factory=factory) as session:
+        row = (await session.execute(query)).one()
+    return InboxCounts(*row)
 
 
 async def get_conversation(

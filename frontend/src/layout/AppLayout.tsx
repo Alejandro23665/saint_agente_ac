@@ -30,8 +30,7 @@ function navClass({ isActive }: { isActive: boolean }) {
 }
 
 function WaitingBadge() {
-  const { session } = useAuth();
-  const counts = useInboxCounts(session?.user.id ?? "");
+  const counts = useInboxCounts();
   if (!counts?.waiting) return null;
   return (
     <span className="badge" aria-label={`${counts.waiting} esperan respuesta`}>

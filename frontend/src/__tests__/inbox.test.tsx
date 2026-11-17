@@ -49,6 +49,15 @@ function fakeApi(rows: Conversation[]) {
     if (u.pathname === "/auth/refresh") return json(200, SESSION);
     if (u.pathname === "/events") return new Response(null, { status: 503 });
     if (u.pathname === "/numbers") return json(200, []);
+    if (u.pathname === "/conversations/counts") {
+      const open = rows.filter((c) => c.status === "open");
+      return json(200, {
+        open: open.length,
+        waiting: open.filter((c) => c.waiting_reply).length,
+        human: open.filter((c) => c.mode === "human").length,
+        mine: open.filter((c) => c.assigned?.user_id === SESSION.user.id).length,
+      });
+    }
     if (u.pathname === "/conversations") {
       const q = u.searchParams.get("q")?.toLowerCase();
       const before = u.searchParams.get("before");

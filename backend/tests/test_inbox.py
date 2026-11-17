@@ -18,6 +18,7 @@ from app.main import create_app
 from app.models import Conversation, HandoffEvent, Message
 from app.models.enums import (
     ConversationMode,
+    ConversationStatus,
     MembershipRole,
     MessageDirection,
     MessageStatus,
@@ -140,6 +141,34 @@ async def test_bandeja_y_mensajes(client, owner_engine) -> None:
         headers=headers,
     )
     assert [m["text"] for m in earlier.json()] == ["Hola"]
+
+
+async def test_contadores_de_inicio(client, owner_engine) -> None:
+    """Cuenta todas las abiertas, sin el tope de 100 de la bandeja."""
+    tenant, owner = await setup(owner_engine)
+    other = await create_user(owner_engine, (tenant, MembershipRole.AGENT))
+    chats = [await chat(owner_engine, tenant, (f"Hola {i}",)) for i in range(102)]
+    async with AsyncSession(owner_engine) as s, s.begin():
+        answered = await s.get(Conversation, chats[0].id)
+        answered.last_outbound_at = datetime.now(UTC)  # ya le contestaron
+        human = await s.get(Conversation, chats[1].id)
+        human.mode = ConversationMode.HUMAN
+        human.assigned_user_id = owner.id
+        other_one = await s.get(Conversation, chats[2].id)
+        other_one.assigned_user_id = other.id
+        closed = await s.get(Conversation, chats[3].id)
+        closed.status = ConversationStatus.CLOSED
+    headers = await headers_for(client, owner)
+
+    response = await client.get("/conversations/counts", headers=headers)
+    assert response.status_code == 200
+    assert response.json() == {"open": 101, "waiting": 100, "human": 1, "mine": 1}
+    # Otro negocio no ve estas conversaciones.
+    _, stranger = await setup(owner_engine)
+    other_h = await headers_for(client, stranger)
+    counts = (await client.get("/conversations/counts", headers=other_h)).json()
+    assert counts == {"open": 0, "waiting": 0, "human": 0, "mine": 0}
+    assert (await client.get("/conversations/counts")).status_code == 401
 
 
 async def test_contestar_toma_la_conversacion(client, owner_engine, queue) -> None:

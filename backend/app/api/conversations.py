@@ -1,6 +1,7 @@
 """Rutas de la bandeja del panel: /conversations/...
 
 - GET  /conversations                       la bandeja (filtros y páginas)
+- GET  /conversations/counts                los contadores de Inicio (todas las abiertas)
 - GET  /conversations/{id}                  una conversación
 - GET  /conversations/{id}/messages         sus mensajes (páginas hacia atrás)
 - POST /conversations/{id}/messages         contestar como persona
@@ -182,6 +183,21 @@ async def list_conversations(
         factory=factory,
     )
     return [_out(r) for r in rows]
+
+
+class CountsOut(BaseModel):
+    open: int
+    waiting: int
+    human: int
+    mine: int
+
+
+# Va antes de /{conversation_id}: si no, "counts" se leería como un id.
+@router.get("/counts", response_model=CountsOut)
+async def count_conversations(member: CurrentMember, factory: Factory) -> CountsOut:
+    """Abiertas, esperando respuesta, atendidas por una persona y asignadas a mí."""
+    counts = await inbox.count_conversations(member, factory=factory)
+    return CountsOut(open=counts.open, waiting=counts.waiting, human=counts.human, mine=counts.mine)
 
 
 @router.get("/{conversation_id}", response_model=ConversationOut)

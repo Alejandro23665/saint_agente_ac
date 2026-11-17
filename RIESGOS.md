@@ -126,8 +126,9 @@ Prioridad: **Alta** (puede afectar a clientes reales o a la seguridad), **Media*
   `services/agents.py:24`).
 - [ ] `app_role()` está copiada en las migraciones 0002, 0004, 0005 y 0006, y las
   migraciones importan `app.core.config`.
-- [ ] Panel: Inicio cuenta solo con las primeras 100 conversaciones (no hay ruta de
-  totales; se resuelve en 6.11). Horario, agente y miembros no tienen aviso propio en
+- [x] Panel: Inicio contaba solo las primeras 100 conversaciones. Resuelto en el 6.11
+  (17/11) con `GET /conversations/counts`.
+- [ ] Panel: horario, agente y miembros no tienen aviso propio en
   `/events`: desde 6.2 se recargan al reconectar y cuando la pantalla que los cambia llama
   a `useDashboardRefresh()`, pero un cambio hecho desde otro navegador no se ve hasta
   recargar.

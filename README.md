@@ -75,7 +75,7 @@ Los errores y riesgos conocidos están en [RIESGOS.md](RIESGOS.md).
 | 6.8 | Panel: Equipo (miembros, roles, invitaciones) | Lista |
 | 6.9 | Panel: Ajustes del negocio y mi cuenta (cambiar contraseña, cerrar todas las sesiones) | Lista |
 | 6.10 | Consumo: contadores diarios, `GET /usage` y su pantalla | Lista |
-| 6.11 | Cierre del panel: totales de Inicio, revisión en el móvil, prueba completa | Pendiente |
+| 6.11 | Cierre del panel: totales de Inicio (`GET /conversations/counts`), revisión en el móvil, prueba completa | Lista |
 | 7 | Despliegue: Dockerfiles, Caddy o nginx, integración continua y repositorio git | Pendiente |
 
 ## Lo que falta
@@ -85,7 +85,6 @@ Los errores y riesgos conocidos están en [RIESGOS.md](RIESGOS.md).
 | **4.5 RAG** | El bot todavía no usa el conocimiento: contesta solo con las instrucciones y el historial | Bloque 4.5 |
 | **4.6 Horario y pasar a humano** | El horario y el mensaje fuera de horario se guardan pero el bot no los usa; la IA no puede pasar una conversación a una persona; si el dueño contesta desde su teléfono, el bot sigue en modo bot | Bloque 4.6 |
 | **4.7 Notas de voz** | Los audios quedan sin transcribir (`transcription_status = pending`) | Bloque 4.7 |
-| **6.11 Cierre del panel** | Inicio cuenta solo las primeras 100 conversaciones (falta `GET /conversations/counts`) | Bloque 6.11 |
 | **Instagram** | Solo existe en el esquema (`Channel.INSTAGRAM`); todo el código usa WhatsApp | Sin bloque aún |
 | **Despliegue** | No hay Dockerfile del backend ni del panel, ni Caddy/nginx, ni integración continua. La carpeta tampoco es un repositorio git | Fase 7 |
 | **Recuperar contraseña** | Hoy solo se cambia estando dentro | Sin bloque aún |
@@ -252,7 +251,7 @@ Copia `.env.example` a `.env`. Las claves van **solo** ahí, nunca en el código
 
 | Dónde | Comando | Qué cubre |
 |-------|---------|-----------|
-| Backend | `cd backend && uv run pytest` | 264 pruebas: migraciones, RLS, webhooks, cola, bot, sesión, miembros, bandeja, agente, conocimiento, consumo. Necesita PostgreSQL y Redis; crea y borra la base `saint_test` |
+| Backend | `cd backend && uv run pytest` | 265 pruebas: migraciones, RLS, webhooks, cola, bot, sesión, miembros, bandeja, agente, conocimiento, consumo. Necesita PostgreSQL y Redis; crea y borra la base `saint_test` |
 | Backend | `uv run ruff check . && uv run ruff format --check .` | Lint y formato |
 | Panel | `cd frontend && npm test` | 115 pruebas con la API simulada |
 | Panel | `npm run typecheck` · `npm run build` | Revisión de tipos y compilación |
@@ -441,6 +440,7 @@ La persona invitada abre el enlace (vence a las 72 horas y sirve una sola vez):
 | Ruta | Qué hace |
 | --- | --- |
 | `GET /conversations` | La bandeja, la más reciente primero. Filtros: `status`, `mode`, `mine`, `number_id`, `q` (nombre o teléfono); página siguiente con `before` |
+| `GET /conversations/counts` | Los contadores de Inicio y del menú sobre todas las abiertas: `open`, `waiting` (esperan respuesta), `human` (las atiende una persona), `mine` (asignadas a mí) |
 | `GET /conversations/{id}` | Una conversación (contacto, número, asignada a, esperando respuesta) |
 | `GET /conversations/{id}/messages` | Sus mensajes, el más viejo arriba; más antiguos con `before` |
 | `POST /conversations/{id}/messages` | Contestar como persona (queda en la cola de salida) |
@@ -591,12 +591,22 @@ npm run dev        # abre http://127.0.0.1:5173
 - **Elegir negocio:** aparece si la persona tiene varios; con uno solo, entra directo. Se puede
   cambiar de negocio en cualquier momento desde la barra de arriba.
 - **Inicio:** cuatro contadores (abiertas, esperan respuesta, las atiende una persona, asignadas
-  a mí; con más de 100 muestran "100+"), "Primeros pasos" (conectar el número, revisar el agente,
+  a mí; desde el 6.11 cuentan todas las abiertas con `GET /conversations/counts`), "Primeros pasos" (conectar el número, revisar el agente,
   subir conocimiento, invitar al equipo; cada uno con su enlace) y la tarjeta "Tu número". Se
   actualiza solo con los avisos de `/events`.
 - **Barra superior:** "Agente IA activo / sin número" y "Abierto ahora / Fuera de horario".
-- **Límite conocido:** los contadores de Inicio salen de las primeras 100 conversaciones; se
-  corrige en el 6.11 con `GET /conversations/counts`.
+
+### Cierre del panel (6.11)
+
+- **Contadores sin tope:** Inicio y el número del menú (esperan respuesta) salen de
+  `GET /conversations/counts`, que cuenta en la base todas las abiertas. Antes se pedían las
+  primeras 100 conversaciones y con más se mostraba "100+".
+- **Revisión en el móvil:** todas las pantallas revisadas a 375 px y 320 px de ancho, sin
+  desplazamiento horizontal. En Consumo, las opciones de periodo y de gráfico se deslizan de
+  lado cuando no caben.
+- **Prueba completa:** iniciar sesión, ver Inicio, abrir una conversación de la bandeja,
+  contestar como persona y volver a Inicio: los contadores cambian solos (una más atendida por
+  una persona y asignada a mí, una menos esperando respuesta).
 
 ### Piezas comunes del panel y aceptar una invitación (6.2)
 

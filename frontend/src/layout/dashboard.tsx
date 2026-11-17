@@ -11,12 +11,12 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { ReactNode } from "react";
 
 import { api } from "../api/client";
-import type { Agent, Conversation, Hours, KnowledgeSource, Member, WhatsappNumber } from "../api/types";
+import type { Agent, Hours, InboxCounts, KnowledgeSource, Member, WhatsappNumber } from "../api/types";
 import { connectEvents } from "../realtime/events";
 import type { PanelEvent } from "../realtime/events";
 
 export interface DashboardData {
-  conversations: Conversation[] | null;
+  counts: InboxCounts | null;
   numbers: WhatsappNumber[] | null;
   hours: Hours | null;
   agent: Agent | null;
@@ -26,7 +26,7 @@ export interface DashboardData {
 }
 
 const EMPTY: DashboardData = {
-  conversations: null,
+  counts: null,
   numbers: null,
   hours: null,
   agent: null,
@@ -38,8 +38,8 @@ const EMPTY: DashboardData = {
 export type Part = Exclude<keyof DashboardData, "failed">;
 
 const SOURCES: Record<Part, string> = {
-  // La primera página de la bandeja (hasta 100): alcanza para los contadores de Inicio.
-  conversations: "/conversations?limit=100",
+  // Los contadores de Inicio y del menú, sobre todas las conversaciones abiertas (6.11).
+  counts: "/conversations/counts",
   numbers: "/numbers",
   hours: "/hours",
   agent: "/agent",
@@ -54,8 +54,8 @@ const ALL = Object.keys(SOURCES) as Part[];
 // tienen aviso propio: los recarga la pantalla que los cambia (refresh).
 const EVENT_PARTS: Record<string, Part[]> = {
   ready: ALL,
-  "conversation.changed": ["conversations"],
-  "inbox.changed": ["conversations"],
+  "conversation.changed": ["counts"],
+  "inbox.changed": ["counts"],
   "numbers.changed": ["numbers"],
   "knowledge.changed": ["knowledge"],
 };
@@ -179,25 +179,9 @@ export function useEvents(types: string[], onEvent: Listener): void {
   }, [subscribe, key]);
 }
 
-export interface InboxCounts {
-  open: number;
-  waiting: number;
-  human: number;
-  mine: number;
-  capped: boolean; // hay más de 100: los números son "100+"
-}
+export type { InboxCounts };
 
-export function inboxCounts(conversations: Conversation[], myId: string): InboxCounts {
-  return {
-    open: conversations.length,
-    waiting: conversations.filter((c) => c.waiting_reply).length,
-    human: conversations.filter((c) => c.mode === "human").length,
-    mine: conversations.filter((c) => c.assigned?.user_id === myId).length,
-    capped: conversations.length >= 100,
-  };
-}
-
-export function useInboxCounts(myId: string): InboxCounts | null {
-  const { conversations } = useDashboard();
-  return useMemo(() => (conversations ? inboxCounts(conversations, myId) : null), [conversations, myId]);
+/** Los contadores de la bandeja (GET /conversations/counts), o null mientras cargan. */
+export function useInboxCounts(): InboxCounts | null {
+  return useDashboard().counts;
 }
