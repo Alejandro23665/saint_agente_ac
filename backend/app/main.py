@@ -19,6 +19,7 @@ from app.api import (
     knowledge,
     numbers,
     tenant,
+    usage,
     webhooks,
 )
 from app.core.config import Settings, get_settings
@@ -74,6 +75,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(conversations.router)
     app.include_router(agent.router)
     app.include_router(knowledge.router)
+    app.include_router(usage.router)
     app.include_router(events.router)
     return app
 

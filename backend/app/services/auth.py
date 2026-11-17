@@ -23,6 +23,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.auth_tokens import (
+    MIN_PASSWORD_LENGTH,
     REFRESH_TOKEN_DAYS,
     hash_password,
     password_needs_rehash,
@@ -39,6 +40,7 @@ MAX_FAILURES_PER_EMAIL = 5
 MAX_FAILURES_PER_IP = 20
 LOCK_SECONDS = 15 * 60
 USER_AGENT_MAX = 300
+NAME_MAX = 120
 
 
 class InvalidCredentialsError(Exception):
@@ -57,6 +59,15 @@ class InvalidSessionError(Exception):
 
 class NotMemberError(Exception):
     """El usuario no pertenece a ese negocio (o el negocio está desactivado)."""
+
+
+class WrongPasswordError(Exception):
+    """La contraseña actual que escribió la persona no es la correcta."""
+
+
+class InvalidAccountInputError(Exception):
+    """Un dato de la cuenta no es válido (contraseña nueva muy corta, nombre vacío...).
+    El mensaje se muestra tal cual."""
 
 
 @dataclass(frozen=True)
@@ -215,6 +226,85 @@ async def revoke_all(
             .where(RefreshToken.user_id == user_id, RefreshToken.revoked_at.is_(None))
             .values(revoked_at=func.now())
         )
+
+
+async def end_sessions(
+    user_id: uuid.UUID,
+    *,
+    keep_refresh_token: str | None = None,
+    factory: async_sessionmaker[AsyncSession] = SessionFactory,
+) -> int:
+    """Cierra a propósito las sesiones abiertas de un usuario (salvo keep_refresh_token).
+
+    Se hace VENCIÉNDOLAS, no marcándolas como revocadas: un pase revocado que se vuelve a
+    presentar se toma por robado y cierra todas las sesiones (ver refresh). Aquí el cierre es
+    voluntario: cuando ese dispositivo intente renovar, solo recibe "sesión terminada" y no
+    arrastra las sesiones nuevas. Devuelve cuántas cerró.
+    """
+    async with factory() as session, session.begin():
+        return await _end_sessions(session, user_id, keep_refresh_token)
+
+
+async def _end_sessions(
+    session: AsyncSession, user_id: uuid.UUID, keep_refresh_token: str | None
+) -> int:
+    stmt = update(RefreshToken).where(
+        RefreshToken.user_id == user_id,
+        RefreshToken.revoked_at.is_(None),
+        RefreshToken.expires_at > func.now(),
+    )
+    if keep_refresh_token:
+        stmt = stmt.where(RefreshToken.token_hash != hash_secret(keep_refresh_token))
+    result = await session.execute(stmt.values(expires_at=func.now()))
+    return result.rowcount
+
+
+async def change_password(
+    user_id: uuid.UUID,
+    current_password: str,
+    new_password: str,
+    *,
+    keep_refresh_token: str | None = None,
+    factory: async_sessionmaker[AsyncSession] = SessionFactory,
+) -> int:
+    """Cambia la contraseña y cierra las demás sesiones. Devuelve cuántas cerró.
+
+    La sesión desde la que se cambió (keep_refresh_token) sigue abierta: así quien cambia su
+    contraseña no tiene que volver a entrar, pero cualquier otro dispositivo (por ejemplo,
+    uno que se perdió o donde alguien más tenía acceso) deja de servir.
+    """
+    if len(new_password) < MIN_PASSWORD_LENGTH:
+        raise InvalidAccountInputError(
+            f"La contraseña nueva debe tener al menos {MIN_PASSWORD_LENGTH} caracteres"
+        )
+    async with factory() as session, session.begin():
+        user = await session.scalar(select(User).where(User.id == user_id).with_for_update())
+        if user is None or not user.is_active or user.deleted_at is not None:
+            raise InvalidSessionError
+        if not verify_password(current_password, user.password_hash):
+            raise WrongPasswordError
+        if new_password == current_password:
+            raise InvalidAccountInputError("La contraseña nueva debe ser distinta de la actual")
+        user.password_hash = hash_password(new_password)
+        return await _end_sessions(session, user_id, keep_refresh_token)
+
+
+async def update_profile(
+    user_id: uuid.UUID,
+    full_name: str,
+    *,
+    factory: async_sessionmaker[AsyncSession] = SessionFactory,
+) -> User:
+    """Cambia el nombre con el que la persona aparece ante su equipo."""
+    name = " ".join(full_name.split())
+    if not name or len(name) > NAME_MAX:
+        raise InvalidAccountInputError(f"El nombre debe tener entre 1 y {NAME_MAX} caracteres")
+    async with factory() as session, session.begin():
+        user = await session.scalar(select(User).where(User.id == user_id).with_for_update())
+        if user is None or not user.is_active or user.deleted_at is not None:
+            raise InvalidSessionError
+        user.full_name = name
+    return user
 
 
 async def tenants_for(

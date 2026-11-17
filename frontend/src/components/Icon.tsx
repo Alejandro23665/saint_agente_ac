@@ -87,6 +87,53 @@ const PATHS: Record<string, JSX.Element> = {
     </>
   ),
   spinner: <path d="M12 3a9 9 0 1 0 9 9" />,
+  plus: <path d="M12 5v14M5 12h14" />,
+  close: <path d="M6 6l12 12M18 6L6 18" />,
+  trash: (
+    <>
+      <path d="M4 7h16M10 11v6M14 11v6" />
+      <path d="M6 7l1 13h10l1-13M9 7V4h6v3" />
+    </>
+  ),
+  refresh: (
+    <>
+      <path d="M20 11a8 8 0 0 0-14.6-4.5L4 8" />
+      <path d="M4 4v4h4M4 13a8 8 0 0 0 14.6 4.5L20 16" />
+      <path d="M20 20v-4h-4" />
+    </>
+  ),
+  copy: (
+    <>
+      <rect x="9" y="9" width="11" height="11" rx="2" />
+      <path d="M5 15V6a2 2 0 0 1 2-2h8" />
+    </>
+  ),
+  send: <path d="M4 12l16-8-6 16-2.5-6.5z" />,
+  upload: (
+    <>
+      <path d="M12 16V4M7 9l5-5 5 5" />
+      <path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3" />
+    </>
+  ),
+  edit: <path d="M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4" />,
+  history: (
+    <>
+      <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
+      <path d="M3 3v5h5M12 7v5l3 2" />
+    </>
+  ),
+  link: (
+    <>
+      <path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1" />
+      <path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" />
+    </>
+  ),
+  mail: (
+    <>
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <path d="M3 7l9 6 9-6" />
+    </>
+  ),
 };
 
 export type IconName = keyof typeof PATHS;

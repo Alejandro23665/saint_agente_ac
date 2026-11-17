@@ -3,20 +3,17 @@ import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { useAuth } from "./auth/session";
 import { Logo } from "./components/Logo";
 import { AppLayout } from "./layout/AppLayout";
+import { AcceptInvitation } from "./pages/AcceptInvitation";
+import { AgentPage } from "./pages/Agent";
 import { ChooseBusiness } from "./pages/ChooseBusiness";
-import { ComingSoon } from "./pages/ComingSoon";
 import { Home } from "./pages/Home";
+import { Inbox } from "./pages/Inbox";
+import { Knowledge } from "./pages/Knowledge";
 import { Login } from "./pages/Login";
-
-const SOON = [
-  { path: "bandeja", title: "Bandeja", block: "6.3", text: "Todas las conversaciones de WhatsApp, al instante." },
-  { path: "numeros", title: "Números de WhatsApp", block: "6.2", text: "Conecta tus números con un QR y mira su estado." },
-  { path: "agente", title: "Agente y horario", block: "6.4", text: "Lo que dice tu agente y cuándo atiende tu negocio." },
-  { path: "conocimiento", title: "Conocimiento", block: "6.5", text: "Lo que el bot sabe de tu negocio." },
-  { path: "equipo", title: "Equipo", block: "6.7", text: "Quién atiende contigo y qué puede hacer cada uno." },
-  { path: "consumo", title: "Consumo", block: "6.6", text: "Cuántos mensajes y respuestas de IA usa tu negocio." },
-  { path: "ajustes", title: "Ajustes del negocio", block: "6.7", text: "Nombre, país y zona horaria del negocio." },
-];
+import { Numbers } from "./pages/Numbers";
+import { Settings } from "./pages/Settings";
+import { Team } from "./pages/Team";
+import { Usage } from "./pages/Usage";
 
 function Splash() {
   return (
@@ -31,6 +28,9 @@ export function App() {
   const location = useLocation();
 
   if (status === "loading") return <Splash />;
+
+  // El enlace de invitación se abre con o sin sesión (y no debe perder el #token).
+  if (location.pathname === "/invitacion") return <AcceptInvitation />;
 
   if (status === "anonymous") {
     return location.pathname === "/iniciar-sesion" ? (
@@ -51,9 +51,13 @@ export function App() {
       <Route path="/elegir-negocio" element={session.tenants.length > 1 ? <ChooseBusiness /> : <Navigate to="/" replace />} />
       <Route element={<AppLayout />}>
         <Route index element={<Home />} />
-        {SOON.map((s) => (
-          <Route key={s.path} path={s.path} element={<ComingSoon title={s.title} block={s.block} text={s.text} />} />
-        ))}
+        <Route path="numeros" element={<Numbers />} />
+        <Route path="bandeja/:id?" element={<Inbox />} />
+        <Route path="agente" element={<AgentPage />} />
+        <Route path="conocimiento" element={<Knowledge />} />
+        <Route path="equipo" element={<Team />} />
+        <Route path="ajustes" element={<Settings />} />
+        <Route path="consumo" element={<Usage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

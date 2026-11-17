@@ -1,19 +1,12 @@
 import { Link } from "react-router-dom";
 
-import type { NumberStatus } from "../api/types";
 import { useAuth } from "../auth/session";
 import { Alert } from "../components/Alert";
+import { StatusPill } from "../components/Feedback";
 import { Icon } from "../components/Icon";
 import { useDashboard, useInboxCounts } from "../layout/dashboard";
-
-const NUMBER_STATUS: Record<NumberStatus, { label: string; pill: string }> = {
-  open: { label: "Conectado", pill: "pill-success" },
-  connecting: { label: "Conectando", pill: "pill-warn" },
-  qr_pending: { label: "Falta escanear el QR", pill: "pill-warn" },
-  created: { label: "Falta escanear el QR", pill: "pill-warn" },
-  close: { label: "Desconectado", pill: "pill-danger" },
-  banned: { label: "Bloqueado por WhatsApp", pill: "pill-danger" },
-};
+import { phone } from "../lib/format";
+import { NUMBER_STATUS, statusOf } from "../lib/status";
 
 function Count({ value, capped }: { value: number | undefined; capped?: boolean }) {
   if (value === undefined) return <span className="skeleton" aria-label="Cargando" />;
@@ -72,7 +65,7 @@ export function Home() {
   ];
   const doneCount = steps.filter((s) => s.done).length;
   const number = data.numbers?.[0];
-  const status = number ? NUMBER_STATUS[number.status] : null;
+  const status = number ? statusOf(NUMBER_STATUS, number.status) : null;
 
   return (
     <main className="page">
@@ -124,14 +117,14 @@ export function Home() {
                   <Icon name="phone" />
                 </span>
                 <span>
-                  <strong>{number.phone ?? "Número sin vincular"}</strong>
+                  <strong>{number.phone ? phone(number.phone) : "Número sin vincular"}</strong>
                   <small>
                     {data.numbers.length > 1 ? `y ${data.numbers.length - 1} más` : "Tu número de WhatsApp"}
                   </small>
                 </span>
               </div>
-              <span className={`pill ${status.pill}`} style={{ alignSelf: "flex-start" }}>
-                {status.label}
+              <span style={{ alignSelf: "flex-start" }}>
+                <StatusPill tone={status.tone}>{status.label}</StatusPill>
               </span>
               <p className="muted">
                 Si el teléfono se desconecta, aquí te avisamos al momento y te mostramos cómo volver a conectarlo.

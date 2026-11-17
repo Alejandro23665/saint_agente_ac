@@ -141,7 +141,7 @@ function Shell() {
         <ul className="nav">
           {SECTIONS.map((s) => (
             <li key={s.to}>
-              <NavLink to={s.to} end className={navClass}>
+              <NavLink to={s.to} end={s.to === "/"} className={navClass}>
                 <Icon name={s.icon} />
                 <span>{s.label}</span>
                 {s.to === "/bandeja" && <WaitingBadge />}
@@ -180,7 +180,7 @@ function Shell() {
 
       <nav className="bottom-nav" aria-label="Menú del panel">
         {mobileMain.map((s) => (
-          <NavLink key={s.to} to={s.to} end className={({ isActive }) => (isActive ? "active" : "")} onClick={() => setMoreOpen(false)}>
+          <NavLink key={s.to} to={s.to} end={s.to === "/"} className={({ isActive }) => (isActive ? "active" : "")} onClick={() => setMoreOpen(false)}>
             <Icon name={s.icon} size={22} />
             {s.short}
           </NavLink>

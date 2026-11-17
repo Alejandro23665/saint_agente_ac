@@ -31,6 +31,7 @@ from app.models.enums import (
     SenderType,
     TranscriptionStatus,
 )
+from app.services import usage
 
 logger = logging.getLogger(__name__)
 
@@ -194,6 +195,31 @@ async def upsert_contact(
     return await session.scalar(stmt)
 
 
+async def _open_conversation(
+    session: AsyncSession, tenant_id: uuid.UUID, instance_id: uuid.UUID, contact_id: uuid.UUID
+) -> tuple[uuid.UUID, bool]:
+    """(id de la conversación abierta, si se acaba de crear). Ver open_conversation."""
+    created = await session.scalar(
+        insert(Conversation)
+        .values(tenant_id=tenant_id, channel_instance_id=instance_id, contact_id=contact_id)
+        .on_conflict_do_nothing(
+            index_elements=["channel_instance_id", "contact_id"],
+            index_where=text("status = 'open'"),
+        )
+        .returning(Conversation.id)
+    )
+    if created is not None:
+        return created, True
+    existing = await session.scalar(
+        select(Conversation.id).where(
+            Conversation.channel_instance_id == instance_id,
+            Conversation.contact_id == contact_id,
+            Conversation.status == ConversationStatus.OPEN,
+        )
+    )
+    return existing, False
+
+
 async def open_conversation(
     session: AsyncSession, tenant_id: uuid.UUID, instance_id: uuid.UUID, contact_id: uuid.UUID
 ) -> uuid.UUID:
@@ -202,21 +228,7 @@ async def open_conversation(
     El índice único parcial (solo status='open') garantiza una sola abierta. Si otro
     worker la crea justo antes, ON CONFLICT DO NOTHING no falla y la leemos después.
     """
-    await session.execute(
-        insert(Conversation)
-        .values(tenant_id=tenant_id, channel_instance_id=instance_id, contact_id=contact_id)
-        .on_conflict_do_nothing(
-            index_elements=["channel_instance_id", "contact_id"],
-            index_where=text("status = 'open'"),
-        )
-    )
-    return await session.scalar(
-        select(Conversation.id).where(
-            Conversation.channel_instance_id == instance_id,
-            Conversation.contact_id == contact_id,
-            Conversation.status == ConversationStatus.OPEN,
-        )
-    )
+    return (await _open_conversation(session, tenant_id, instance_id, contact_id))[0]
 
 
 async def store_message(
@@ -239,7 +251,7 @@ async def store_message(
         return None  # era un mensaje de Saint: ya tiene su fila
 
     contact_id = await upsert_contact(session, event.tenant_id, parsed)
-    conversation_id = await open_conversation(
+    conversation_id, new_conversation = await _open_conversation(
         session, event.tenant_id, event.channel_instance_id, contact_id
     )
 
@@ -283,6 +295,15 @@ async def store_message(
         return None
 
     moment = parsed.timestamp or datetime.now(UTC)
+    # Consumo: lo que el negocio ve en la pantalla Consumo (día en su zona horaria).
+    await usage.record(
+        session,
+        event.tenant_id,
+        at=moment,
+        conversations=int(new_conversation),
+        inbound_messages=0 if outbound else 1,
+        outbound_messages=1 if outbound else 0,
+    )
     values: dict[str, Any] = {
         "last_message_at": func.greatest(Conversation.last_message_at, moment)
     }
@@ -354,6 +375,8 @@ async def _confirm_our_send(
     ours.external_id = parsed.external_id
     ours.status = MessageStatus.SENT
     moment = parsed.timestamp or datetime.now(UTC)
+    # Es el momento en que sabemos que salió (el worker no pudo confirmarlo).
+    await usage.record(session, event.tenant_id, at=moment, outbound_messages=1)
     await session.execute(
         update(Conversation)
         .where(Conversation.id == ours.conversation_id)

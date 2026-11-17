@@ -6,9 +6,14 @@ function conv(overrides: Partial<Conversation>): Conversation {
     id: Math.random().toString(),
     status: "open",
     mode: "bot",
+    contact: { id: "k1", name: "María", phone: "+584121234567" },
+    number_id: "n1",
+    number_phone: null,
     waiting_reply: false,
     assigned: null,
+    last_message: null,
     last_message_at: null,
+    created_at: "2026-11-16T12:00:00Z",
     ...overrides,
   };
 }

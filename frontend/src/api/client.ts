@@ -107,6 +107,17 @@ export function refreshSession(tenantId?: string | null): Promise<Session | null
   return refreshing;
 }
 
+/** "?a=1&b=x" con los valores que no están vacíos (o "" si no queda ninguno). */
+export function query(params: Record<string, string | number | boolean | null | undefined>): string {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === null || value === "" || value === false) continue;
+    search.set(key, String(value));
+  }
+  const text = search.toString();
+  return text ? `?${text}` : "";
+}
+
 export async function api<T>(
   path: string,
   options: { method?: string; body?: unknown; auth?: boolean } = {},

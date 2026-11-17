@@ -4,7 +4,10 @@
 - POST /auth/refresh         cookie -> pase de acceso nuevo (y cookie nueva)
 - POST /auth/select-tenant   elegir con qué negocio trabajar -> pase con ese negocio
 - GET  /auth/me              quién soy, mis negocios y el negocio activo
+- PATCH /auth/me             cambiar mi nombre
+- POST /auth/password        cambiar mi contraseña (cierra las demás sesiones)
 - POST /auth/logout          cierra la sesión de este navegador
+- POST /auth/logout-all      cierra la sesión en todos mis dispositivos
 - POST /auth/invitations/preview  qué negocio invita y a qué correo (antes de aceptar)
 - POST /auth/invitations/accept   aceptar: crea la cuenta (o pide la contraseña) y entra
 
@@ -303,6 +306,100 @@ async def logout(
     cookie = _read_refresh_cookie(saint_refresh)
     if cookie is not None:
         await auth.logout(cookie[0], factory=factory)
+    _clear_refresh_cookie(response)
+    response.status_code = status.HTTP_204_NO_CONTENT
+    return response
+
+
+# --- Mi cuenta ---
+
+
+class ProfileIn(BaseModel):
+    full_name: str = Field(min_length=1, max_length=auth.NAME_MAX * 2)
+
+
+class PasswordChangeIn(BaseModel):
+    current_password: str = Field(min_length=1, max_length=200)
+    new_password: str = Field(min_length=1, max_length=200)
+
+
+class PasswordChangeOut(BaseModel):
+    # Cuántas otras sesiones (otros navegadores o teléfonos) se cerraron.
+    closed_sessions: int
+
+
+WRONG_CURRENT_PASSWORD = "La contraseña actual no es correcta"
+
+
+@router.patch("/me", response_model=UserOut)
+async def update_me(
+    body: ProfileIn,
+    claims: Annotated[AccessClaims, Depends(current_claims)],
+    factory: Factory,
+) -> UserOut:
+    try:
+        user = await auth.update_profile(claims.user_id, body.full_name, factory=factory)
+    except auth.InvalidSessionError as exc:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, SESSION_EXPIRED) from exc
+    except auth.InvalidAccountInputError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+    return UserOut(id=user.id, email=user.email, full_name=user.full_name)
+
+
+@router.post("/password", response_model=PasswordChangeOut)
+async def change_password(
+    body: PasswordChangeIn,
+    request: Request,
+    claims: Annotated[AccessClaims, Depends(current_claims)],
+    factory: Factory,
+    redis: Annotated[Redis, Depends(get_redis)],
+    saint_refresh: Annotated[str | None, Cookie()] = None,
+) -> PasswordChangeOut:
+    """Cambia la contraseña y cierra todas las demás sesiones (la de este navegador sigue).
+
+    Si la contraseña actual está mal responde 422 (no 401: el panel tomaría un 401 por un
+    pase vencido). Equivocarse varias veces cuenta para el mismo freno que el inicio de sesión.
+    """
+    user = await auth.get_active_user(claims.user_id, factory=factory)
+    if user is None:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, SESSION_EXPIRED)
+    limiter = auth.LoginLimiter(redis)
+    ip = client_ip(request)
+    cookie = _read_refresh_cookie(saint_refresh)
+    try:
+        await limiter.check(user.email, ip)
+        closed = await auth.change_password(
+            user.id,
+            body.current_password,
+            body.new_password,
+            keep_refresh_token=cookie[0] if cookie else None,
+            factory=factory,
+        )
+    except auth.TooManyAttemptsError as exc:
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            TOO_MANY,
+            headers={"Retry-After": str(exc.retry_after)},
+        ) from exc
+    except auth.WrongPasswordError as exc:
+        await limiter.failed(user.email, ip)
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, WRONG_CURRENT_PASSWORD) from exc
+    except auth.InvalidAccountInputError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+    except auth.InvalidSessionError as exc:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, SESSION_EXPIRED) from exc
+    await limiter.succeeded(user.email)
+    return PasswordChangeOut(closed_sessions=closed)
+
+
+@router.post("/logout-all", status_code=status.HTTP_204_NO_CONTENT)
+async def logout_all(
+    response: Response,
+    claims: Annotated[AccessClaims, Depends(current_claims)],
+    factory: Factory,
+) -> Response:
+    """Cierra la sesión en todos los dispositivos, incluido este navegador."""
+    await auth.end_sessions(claims.user_id, factory=factory)
     _clear_refresh_cookie(response)
     response.status_code = status.HTTP_204_NO_CONTENT
     return response

@@ -37,7 +37,7 @@ from app.models.enums import (
     MessageDirection,
     SenderType,
 )
-from app.services import agents
+from app.services import agents, usage
 from app.services.outbound import queue_text
 
 logger = logging.getLogger(__name__)
@@ -191,6 +191,13 @@ async def answer_conversation(
             status=LLMRunStatus.OK,
         )
         session.add(run)
+        # Los tokens se pagan aunque la respuesta se descarte: se cuentan todos.
+        await usage.record(
+            session,
+            tenant_id,
+            llm_input_tokens=run.input_tokens,
+            llm_output_tokens=run.output_tokens,
+        )
 
         if not _bot_answers(conversation, contact) or answered:
             # La conversación pasó a una persona o ya le contestaron: no se envía.

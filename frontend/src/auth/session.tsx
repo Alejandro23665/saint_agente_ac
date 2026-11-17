@@ -7,8 +7,9 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
+import { invitationApi } from "../api/auth";
 import { api, ApiError, configureSession, refreshSession, storeSession } from "../api/client";
-import type { Session } from "../api/types";
+import type { AcceptInvitationIn, Role, Session } from "../api/types";
 
 type Status = "loading" | "anonymous" | "ready";
 // Por qué se volvió al inicio de sesión (para explicarlo allí).
@@ -21,6 +22,8 @@ interface SessionContextValue {
   login: (email: string, password: string, remember: boolean) => Promise<void>;
   logout: () => Promise<void>;
   selectTenant: (tenantId: string) => Promise<void>;
+  // Acepta una invitación y entra con ese negocio elegido.
+  acceptInvitation: (body: AcceptInvitationIn) => Promise<void>;
 }
 
 const SessionContext = createContext<SessionContextValue | null>(null);
@@ -110,9 +113,16 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     [enter],
   );
 
+  const acceptInvitation = useCallback(
+    async (body: AcceptInvitationIn) => {
+      enter(await invitationApi.accept(body));
+    },
+    [enter],
+  );
+
   const value = useMemo(
-    () => ({ status, session, notice, login, logout, selectTenant }),
-    [status, session, notice, login, logout, selectTenant],
+    () => ({ status, session, notice, login, logout, selectTenant, acceptInvitation }),
+    [status, session, notice, login, logout, selectTenant, acceptInvitation],
   );
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }
@@ -133,4 +143,21 @@ export function initials(name: string): string {
   const words = name.trim().split(/\s+/).filter(Boolean);
   const letters = words.length > 1 ? words[0][0] + words[1][0] : (words[0] ?? "?").slice(0, 2);
   return letters.toUpperCase();
+}
+
+export interface RoleInfo {
+  role: Role | null;
+  isOwner: boolean;
+  // Dueño y administrador: cambiar el negocio, el agente, los números y el conocimiento.
+  canEdit: boolean;
+}
+
+/**
+ * El rol en el negocio activo, para mostrar u ocultar botones. Es solo para la vista:
+ * la API vuelve a comprobarlo en cada petición (y responde can_edit donde aplica).
+ */
+export function useRole(): RoleInfo {
+  const { session } = useAuth();
+  const role = session?.active_tenant?.role ?? null;
+  return { role, isOwner: role === "owner", canEdit: role === "owner" || role === "admin" };
 }

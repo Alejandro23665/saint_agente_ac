@@ -51,6 +51,12 @@ class Settings(BaseSettings):
     openrouter_api_key: SecretStr = SecretStr("")
     embedding_model: str = "nvidia/nemotron-3.5-embed-8b:free"
 
+    # Precio del modelo de IA en dólares por millón de tokens, para estimar el costo en la
+    # pantalla Consumo (bloque 6.10). Sin precios, el panel muestra los tokens y no el costo:
+    # Saint no inventa tarifas. Revisa los precios vigentes de tu proveedor.
+    llm_input_usd_per_million: float | None = None
+    llm_output_usd_per_million: float | None = None
+
 
 @lru_cache
 def get_settings() -> Settings:

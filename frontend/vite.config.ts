@@ -6,7 +6,7 @@ import { defineConfig, loadEnv } from "vite";
 // Vite pasa a la API todo lo que empieza por una de sus rutas. Así la cookie de
 // renovación funciona sin configurar CORS y nada cambia al pasar a producción (Caddy
 // hará lo mismo en el bloque 7.2).
-const API_ROUTES = "^/(auth|tenant|numbers|conversations|agent|hours|knowledge|events|health)(/|\\?|$)";
+const API_ROUTES = "^/(auth|tenant|numbers|conversations|agent|hours|knowledge|usage|events|health)(/|\\?|$)";
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, ".", "");

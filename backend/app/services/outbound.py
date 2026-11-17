@@ -31,6 +31,7 @@ from app.models.enums import (
     MessageStatus,
     SenderType,
 )
+from app.services import usage
 from app.services.message_ingest import open_conversation
 
 logger = logging.getLogger(__name__)
@@ -183,6 +184,10 @@ async def send_queued_message(
     # 3) Guardar el id de WhatsApp. Si el aviso send.message llegó antes, ya lo puso.
     now = datetime.now(UTC)
     async with tenant_session(tenant_id, factory=factory) as session:
+        # Se cuenta como enviado solo si el aviso send.message no lo había confirmado ya.
+        before = await session.scalar(
+            select(Message.status).where(Message.id == message_id).with_for_update()
+        )
         await session.execute(
             update(Message)
             .where(Message.id == message_id)
@@ -200,6 +205,8 @@ async def send_queued_message(
                 last_message_at=func.greatest(Conversation.last_message_at, now),
             )
         )
+        if before in (MessageStatus.QUEUED, MessageStatus.SENDING):
+            await usage.record(session, tenant_id, at=now, outbound_messages=1)
     return SendResult(SendOutcome.SENT)
 
 
