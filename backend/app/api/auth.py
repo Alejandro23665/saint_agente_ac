@@ -118,7 +118,7 @@ def _set_refresh_cookie(response: Response, session: auth.NewSession, remember: 
         path=REFRESH_COOKIE_PATH,
         httponly=True,
         # En producción solo por HTTPS; en desarrollo la API corre en http://127.0.0.1.
-        secure=get_settings().app_env != "development",
+        secure=not get_settings().is_development,
         samesite="strict",
     )
 

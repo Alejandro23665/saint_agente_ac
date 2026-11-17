@@ -61,11 +61,15 @@ Prioridad: **Alta** (puede afectar a clientes reales o a la seguridad), **Media*
 
 ## Riesgos de seguridad y de producción
 
-- [ ] **Alta · Valores por defecto peligrosos.** `APP_ENV` vale `development` si no se
-  define (`core/config.py:12`): en producción quedaría abierto `/docs` y la cookie de
-  renovación sin `Secure` (`api/auth.py:118`). Las credenciales de la base también tienen
-  valores por defecto (`config.py:15-17`). `JWT_SECRET` y `FERNET_KEY` se validan tarde:
-  si faltan, se ve como un error 500 y no al arrancar.
+- [x] **Alta · Valores por defecto peligrosos.** Resuelto (17/11): si falta `APP_ENV`
+  se asume `production` (sin `/docs` y con la cookie `Secure`), y solo acepta
+  `development` o `production`. La API y el worker revisan la configuración al arrancar
+  (`Settings.check_startup` en `core/config.py`) y no arrancan, con un mensaje claro, si
+  falta `JWT_SECRET` (o es corta) o `FERNET_KEY` (o no es válida). En producción además
+  rechazan las contraseñas de ejemplo de la base, que falte `EVOLUTION_API_KEY` y
+  `PANEL_URL` o `PANEL_ORIGINS` sin `https://`. Pruebas en `test_health.py`.
+  Antes: `APP_ENV` valía `development` por defecto y las claves se validaban al usarlas
+  (error 500).
 - [ ] **Alta · Eco a clientes reales.** Sin `ANTHROPIC_API_KEY` el bot responde
   "Recibí: ..." (`bot_reply.py:122-127`). Si además `BOT_TEST_PHONES` está vacío, le
   llega a cualquier cliente.

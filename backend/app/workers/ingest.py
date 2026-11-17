@@ -63,6 +63,8 @@ MAX_REPLY_TRIES = 200
 
 async def startup(ctx: dict[str, Any]) -> None:
     settings = get_settings()
+    # Igual que la API: sin claves o con configuración insegura, el worker no arranca.
+    settings.check_startup()
     ctx["engine"] = build_engine(settings.database_url)
     ctx["factory"] = async_sessionmaker(ctx["engine"], expire_on_commit=False)
     ctx["evolution"] = EvolutionClient.from_settings(settings)

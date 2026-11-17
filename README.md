@@ -236,7 +236,7 @@ Copia `.env.example` a `.env`. Las claves van **solo** ahí, nunca en el código
 |----------|----------|---------------|
 | `POSTGRES_*`, `APP_DB_*`, `EVOLUTION_DB_*` | Usuarios, contraseñas y puertos de los contenedores | Sí |
 | `DATABASE_URL`, `DATABASE_ADMIN_URL`, `REDIS_URL` | Conexiones de la app, de las migraciones y de Redis | Sí |
-| `APP_ENV` | `development` abre `/docs` y la cookie sin `Secure`. **En producción hay que cambiarlo** | Sí |
+| `APP_ENV` | `development` (tu PC: abre `/docs` y la cookie sin `Secure`) o `production`. Si falta, se asume `production`. En producción la API y el worker no arrancan con contraseñas de ejemplo ni sin `https://` | Sí |
 | `EVOLUTION_BASE_URL`, `EVOLUTION_API_KEY` | Hablar con Evolution API | Sí |
 | `PUBLIC_WEBHOOK_BASE_URL` | Dirección con la que Evolution llega a la API (`host.docker.internal:8000` en local) | Sí |
 | `FERNET_KEY` | Cifra los tokens de los números guardados | Sí |
@@ -252,7 +252,7 @@ Copia `.env.example` a `.env`. Las claves van **solo** ahí, nunca en el código
 
 | Dónde | Comando | Qué cubre |
 |-------|---------|-----------|
-| Backend | `cd backend && uv run pytest` | 259 pruebas: migraciones, RLS, webhooks, cola, bot, sesión, miembros, bandeja, agente, conocimiento, consumo. Necesita PostgreSQL y Redis; crea y borra la base `saint_test` |
+| Backend | `cd backend && uv run pytest` | 264 pruebas: migraciones, RLS, webhooks, cola, bot, sesión, miembros, bandeja, agente, conocimiento, consumo. Necesita PostgreSQL y Redis; crea y borra la base `saint_test` |
 | Backend | `uv run ruff check . && uv run ruff format --check .` | Lint y formato |
 | Panel | `cd frontend && npm test` | 115 pruebas con la API simulada |
 | Panel | `npm run typecheck` · `npm run build` | Revisión de tipos y compilación |

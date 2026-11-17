@@ -34,6 +34,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        # Antes que nada: si falta una clave o la configuración es insegura, no arranca.
+        settings.check_startup()
         # Al arrancar: abrir las conexiones una sola vez y compartirlas entre peticiones.
         app.state.engine = build_engine(settings.database_url)
         app.state.session_factory = async_sessionmaker(app.state.engine, expire_on_commit=False)
@@ -45,7 +47,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         await app.state.redis.aclose()
         await app.state.engine.dispose()
 
-    is_dev = settings.app_env == "development"
+    is_dev = settings.is_development
     app = FastAPI(
         title="Saint API",
         version="0.1.0",
